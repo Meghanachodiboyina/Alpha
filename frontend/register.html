@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register | Automated Routine Creator</title>
+    <script>
+        const registerParams = new URLSearchParams(window.location.search);
+        if (registerParams.get("from") !== "home") {
+            window.location.replace("index.html");
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-body">
+    <div class="auth-topbar">
+        <a href="index.html" class="ghost-button">Home</a>
+        <a href="login.html?from=home" class="secondary-button">Login</a>
+    </div>
+    <main class="auth-layout auth-layout-wide">
+        <section class="auth-panel glass auth-spotlight">
+            <span class="badge">Create Account</span>
+            <h1>Build a planning space that feels clear, focused, and personal</h1>
+            <p>Register once, then log in to access your dashboard, AI planner, weekly view, and password recovery support.</p>
+            <div class="auth-feature-grid">
+                <article class="overview-note">
+                    <h4>Smart routine design</h4>
+                    <p>Use AI and manual planning together without leaving the same workspace.</p>
+                </article>
+                <article class="overview-note">
+                    <h4>Safer account access</h4>
+                    <p>Recover forgotten passwords with OTP verification delivered to your email.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="auth-card glass">
+            <form id="registerForm" class="auth-form">
+                <h2>Register</h2>
+                <label>
+                    Full Name
+                    <input type="text" id="registerName" placeholder="Your name" required>
+                </label>
+                <label>
+                    Email
+                    <input type="email" id="registerEmail" placeholder="name@example.com" required>
+                </label>
+                <label>
+                    Password
+                    <input type="password" id="registerPassword" placeholder="Create password" required>
+                </label>
+                <button type="submit" class="primary-button wide">Create Account</button>
+                <p class="auth-switch">Already registered? <a href="login.html?from=home">Login</a></p>
+                <p id="registerMessage" class="form-message"></p>
+            </form>
+        </section>
+    </main>
+    <script src="js/auth.js"></script>
+</body>
+</html>

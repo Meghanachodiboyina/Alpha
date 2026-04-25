@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | Automated Routine Creator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="dashboard-body">
+    <div class="dashboard-shell">
+        <aside class="sidebar glass">
+            <div class="brand sidebar-brand">
+                <span class="brand-mark">ARC</span>
+                <div>
+                    <h1>Routine Creator</h1>
+                    <p>Smart daily planning</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#overview" data-view-link="overview">Overview</a>
+                <a href="#planner" data-view-link="planner">Planner</a>
+                <a href="#routines" data-view-link="routines">Routines</a>
+                <a href="#weekly" data-view-link="weekly">Weekly View</a>
+                <a href="workspace.html">Workspace</a>
+            </nav>
+
+            <button id="logoutButton" class="secondary-button wide">Logout</button>
+        </aside>
+
+        <main class="dashboard-main">
+            <section class="topbar glass">
+                <div>
+                    <p id="pageEyebrow" class="eyebrow">Dashboard</p>
+                    <h2 id="pageTitle">Plan your time with clarity</h2>
+                </div>
+                <div class="topbar-actions">
+                    <span id="currentUserName" class="user-chip">Planner User</span>
+                </div>
+            </section>
+
+            <section id="overview" class="dashboard-page overview-layout" data-view="overview">
+                <div class="stats-grid compact-stats">
+                    <article class="stat-card glass clickable-stat" data-filter-target="all">
+                        <h3>Total Routines</h3>
+                        <p id="totalRoutines">0</p>
+                    </article>
+                    <article class="stat-card glass clickable-stat" data-filter-target="completed">
+                        <h3>Completed</h3>
+                        <p id="completedRoutines">0</p>
+                    </article>
+                    <article class="stat-card glass clickable-stat" data-filter-target="pending">
+                        <h3>Pending</h3>
+                        <p id="pendingRoutines">0</p>
+                    </article>
+                    <article class="stat-card glass clickable-stat" data-filter-target="today">
+                        <h3>Today</h3>
+                        <p id="todayRoutines">0</p>
+                    </article>
+                    <article class="stat-card glass highlight-card">
+                        <h3>Productivity Score</h3>
+                        <p><span id="productivityScore">0</span>%</p>
+                    </article>
+                </div>
+                <div class="dashboard-grid">
+                    <article class="panel glass">
+                        <div class="panel-header">
+                            <div>
+                                <p class="eyebrow">Daily Focus</p>
+                                <h3>Today at a glance</h3>
+                            </div>
+                        </div>
+                        <div id="overviewTodayList" class="routine-list"></div>
+                    </article>
+                    <article class="panel glass">
+                        <div class="panel-header">
+                            <div>
+                                <p class="eyebrow">Weekly Pulse</p>
+                                <h3>Week breakdown</h3>
+                            </div>
+                        </div>
+                        <div id="weeklyOverviewSummary" class="routine-list"></div>
+                    </article>
+                </div>
+            </section>
+
+            <section id="planner" class="dashboard-page dashboard-grid" data-view="planner" hidden>
+                <article class="panel glass">
+                    <div class="panel-header">
+                        <div>
+                            <p class="eyebrow">Smart AI Planner</p>
+                            <h3>Generate routines from text or voice</h3>
+                        </div>
+                    </div>
+
+                    <form id="aiPlannerForm" class="planner-form">
+                        <label>
+                            Describe your tasks
+                            <textarea id="plannerInput" rows="6" placeholder="Today I need to study Python, attend a meeting at 4 PM, go to the gym, and finish my project before Thursday." required></textarea>
+                        </label>
+                        <div class="voice-toolbar">
+                            <button type="button" id="voiceButton" class="ghost-button mic-button" aria-pressed="false">Mic</button>
+                            <button type="button" id="voiceSendButton" class="secondary-button voice-send-button" disabled aria-label="Send voice note">Send</button>
+                            <span id="voiceStatus" class="voice-status">Tap Mic and start speaking. Use Send to submit.</span>
+                        </div>
+                        <label>
+                            Planner Scope
+                            <select id="plannerScope">
+                                <option value="today">Today's Schedule</option>
+                                <option value="daily">Daily Planner</option>
+                                <option value="weekly">Weekly Planner</option>
+                            </select>
+                        </label>
+                        <button type="submit" class="primary-button">Generate Routine</button>
+                    </form>
+
+                    <div id="plannerMessage" class="form-message"></div>
+                    <div id="plannerBreakdown" class="planner-breakdown"></div>
+                    <div id="aiSuggestions" class="tips-list"></div>
+                </article>
+
+                <article class="panel glass">
+                    <div class="panel-header">
+                        <div>
+                            <p class="eyebrow">Manual Routine</p>
+                            <h3>Add or edit a routine</h3>
+                        </div>
+                    </div>
+
+                    <form id="routineForm" class="routine-form">
+                        <input type="hidden" id="routineId">
+                        <label>
+                            Title
+                            <input type="text" id="title" required>
+                        </label>
+                        <label>
+                            Description
+                            <textarea id="description" rows="3"></textarea>
+                        </label>
+                        <div class="form-row">
+                            <label>
+                                Date
+                                <input type="date" id="date" required>
+                            </label>
+                            <label>
+                                Estimated Time (minutes)
+                                <input type="number" id="estimatedTime" min="5" max="720" value="60" required>
+                            </label>
+                        </div>
+                        <div class="form-row">
+                            <label>
+                                Start Time
+                                <input type="time" id="startTime">
+                            </label>
+                            <label>
+                                End Time
+                                <input type="time" id="endTime">
+                            </label>
+                        </div>
+                        <div class="form-row">
+                            <label>
+                                Priority
+                                <select id="priority">
+                                    <option value="High">High</option>
+                                    <option value="Medium" selected>Medium</option>
+                                    <option value="Low">Low</option>
+                                </select>
+                            </label>
+                            <label>
+                                Status
+                                <select id="status">
+                                    <option value="Pending" selected>Pending</option>
+                                    <option value="Completed">Completed</option>
+                                </select>
+                            </label>
+                        </div>
+                        <label>
+                            Suggestion
+                            <textarea id="suggestion" rows="3"></textarea>
+                        </label>
+                        <div class="form-actions">
+                            <button type="submit" class="primary-button">Save Routine</button>
+                            <button type="button" id="resetRoutineForm" class="ghost-button">Clear</button>
+                        </div>
+                    </form>
+
+                    <div id="routineMessage" class="form-message"></div>
+                </article>
+            </section>
+
+            <section id="routines" class="dashboard-page" data-view="routines" hidden>
+                <article class="panel glass">
+                    <div class="panel-header">
+                        <div>
+                            <p class="eyebrow">Routines</p>
+                            <h3 id="routineSectionHeading">All saved routines</h3>
+                            <p id="routineSectionNote">Use filters to explore today, tomorrow, completed, pending, or a specific date.</p>
+                        </div>
+                    </div>
+                    <div class="filter-toolbar">
+                        <select id="routineStatusFilter">
+                            <option value="all">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                        <select id="routineDatePreset">
+                            <option value="all">All Dates</option>
+                            <option value="today">Today</option>
+                            <option value="tomorrow">Tomorrow</option>
+                            <option value="week">This Week</option>
+                        </select>
+                        <input type="date" id="routineDateFilter">
+                        <button type="button" id="clearRoutineFilters" class="ghost-button">Clear Filters</button>
+                    </div>
+                    <div id="routineList" class="routine-list"></div>
+                </article>
+            </section>
+
+            <section id="weekly" class="dashboard-page" data-view="weekly" hidden>
+                <article class="panel glass">
+                    <div class="panel-header">
+                        <div>
+                            <p class="eyebrow">Weekly Planner</p>
+                            <h3>Upcoming routines for this week</h3>
+                        </div>
+                    </div>
+                    <div class="filter-toolbar">
+                        <select id="weeklyDatePreset">
+                            <option value="week">This Week</option>
+                            <option value="tomorrow">Tomorrow</option>
+                            <option value="all">All Upcoming</option>
+                        </select>
+                        <input type="date" id="weeklyDateFilter">
+                        <button type="button" id="clearWeeklyFilters" class="ghost-button">Clear Filters</button>
+                    </div>
+                    <div id="weeklyRoutineList" class="routine-list"></div>
+                </article>
+            </section>
+        </main>
+    </div>
+
+    <script src="js/voice.js"></script>
+    <script src="js/script.js"></script>
+</body>
+</html>
