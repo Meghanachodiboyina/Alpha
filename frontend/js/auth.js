@@ -2,16 +2,15 @@ const resolveApiBaseUrl = () => {
     const saved = localStorage.getItem("arc_api_base");
     if (saved) return saved;
     if (window.location.protocol.startsWith("http") && window.location.hostname) {
-        return `${window.location.protocol}//${window.location.hostname}:8000`;
+        return "https://routine-creator.onrender.com";
     }
-    return "http://127.0.0.1:8000";
+    return "https://routine-creator.onrender.com";
 };
 
 const API_BASE_URL = resolveApiBaseUrl();
 const API_FALLBACK_URLS = Array.from(new Set([
     API_BASE_URL,
-    "http://127.0.0.1:8000",
-    "http://localhost:8000",
+    "https://routine-creator.onrender.com",
 ]));
 const authMessageTimers = new Map();
 
