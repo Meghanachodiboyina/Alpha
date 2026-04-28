@@ -1,5 +1,5 @@
 fastapi==0.115.12
-uvicorn[standard]==0.34.2
+uvicorn==0.34.2
 sqlalchemy==2.0.40
 psycopg2-binary==2.9.10
 supabase==2.10.0
