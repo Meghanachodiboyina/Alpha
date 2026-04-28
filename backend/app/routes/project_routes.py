@@ -1,14 +1,24 @@
 from datetime import date
+import os
+import smtplib
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
-from ..auth import get_current_user, send_workspace_invite_email
+from ..auth import create_invite_token, decode_invite_token, get_current_user, send_workspace_invite_email
 from ..database import get_db
 from ..models import User
 
 router = APIRouter(tags=["Project Management"])
+
+
+def _frontend_invite_url(invite_token: str) -> str:
+    configured_frontend = (os.getenv("FRONTEND_URL") or os.getenv("FRONTEND_ORIGIN") or "").strip().rstrip("/")
+    if not configured_frontend or configured_frontend == "*":
+        configured_frontend = "http://127.0.0.1:5500/AutomatedRoutineCreator/frontend"
+    return f"{configured_frontend}/accept-invite.html?{urlencode({'token': invite_token})}"
 
 
 @router.get("/projects/tasks", response_model=list[schemas.ProjectTaskOut])
@@ -99,8 +109,9 @@ def create_workspace_invitation(
 ):
     if payload.invitee_email.lower() == current_user.email.lower():
         raise HTTPException(status_code=400, detail="You cannot invite your own email.")
-    crud.create_workspace_invite(db, current_user.id, payload.invitee_email.lower(), payload.role)
+    invite = crud.create_workspace_invite(db, current_user.id, payload.invitee_email.lower(), payload.role)
     settings = crud.get_workspace_settings_record(db, current_user)
+    invite_link = _frontend_invite_url(create_invite_token(invite.id, invite.invitee_email))
     smtp_config = {
         "smtp_host": settings.smtp_host,
         "smtp_port": settings.smtp_port,
@@ -110,13 +121,43 @@ def create_workspace_invitation(
         "smtp_use_tls": settings.smtp_use_tls,
     }
     try:
-        send_workspace_invite_email(payload.invitee_email.lower(), current_user.name, smtp_config=smtp_config)
+        send_workspace_invite_email(
+            payload.invitee_email.lower(),
+            current_user.name,
+            invite_link,
+            workspace_name=settings.workspace_name or "Automated Routine Creator Workspace",
+            smtp_config=smtp_config,
+        )
         message = "Workspace invitation created and emailed successfully."
     except RuntimeError:
         message = "Workspace invitation created successfully. Email delivery is not configured yet."
+    except smtplib.SMTPAuthenticationError:
+        message = "Workspace invitation saved, but SMTP login failed. For Gmail, use a 16-character App Password."
     except Exception as exc:
         message = f"Workspace invitation created, but email delivery failed: {exc}"
     return schemas.MessageResponse(message=message)
+
+
+@router.post("/workspace/invitations/accept-token", response_model=schemas.MessageResponse)
+def accept_workspace_invitation_by_token(
+    payload: schemas.WorkspaceInviteTokenAccept,
+    db: Session = Depends(get_db),
+):
+    try:
+        token_data = decode_invite_token(payload.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    invite = crud.get_workspace_invite_by_id(db, int(token_data["invite_id"]))
+    if not invite or invite.invitee_email.lower() != str(token_data["email"]).lower():
+        raise HTTPException(status_code=404, detail="Workspace invitation not found.")
+    if invite.status == "Accepted":
+        return schemas.MessageResponse(message="Invitation already accepted. Please login or register with this email.")
+    if invite.status != "Pending":
+        raise HTTPException(status_code=400, detail="This invitation is no longer pending.")
+
+    crud.respond_workspace_invite(db, invite, "accept")
+    return schemas.MessageResponse(message="Invitation accepted. Please login or register with this invited email to access the workspace.")
 
 
 @router.post("/workspace/invitations/{invite_id}/respond", response_model=schemas.MessageResponse)

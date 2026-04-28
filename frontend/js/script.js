@@ -55,6 +55,8 @@ const dashboardState = {
     },
 };
 const messageTimers = new Map();
+let plannerBreakdownTimer = null;
+let latestPlannerPreviewRoutines = JSON.parse(sessionStorage.getItem("arc_latest_planner_preview") || "[]");
 
 const currentUserName = document.getElementById("currentUserName");
 const pageEyebrow = document.getElementById("pageEyebrow");
@@ -441,7 +443,7 @@ const renderOverview = () => {
                 <h4>${routine.title}</h4>
                 <div class="routine-meta">
                     <span class="tag ${routine.priority.toLowerCase()}">${routine.priority}</span>
-                    <span class="tag info">${formatTime(routine.start_time)} - ${formatTime(routine.end_time)}</span>
+                    <span class="tag time-badge">${formatTime(routine.start_time)} - ${formatTime(routine.end_time)}</span>
                 </div>
                 <div>${routine.suggestion || "Stay consistent and give this task a clean focus block."}</div>
             `;
@@ -464,28 +466,78 @@ const renderOverview = () => {
     }
 };
 
-const renderPlannerBreakdown = (routines = []) => {
+const renderPlannerBreakdown = (routines = [], { remember = true } = {}) => {
     const breakdownContainer = document.getElementById("plannerBreakdown");
+    if (!breakdownContainer) return;
+    window.clearTimeout(plannerBreakdownTimer);
     breakdownContainer.innerHTML = "";
+    const sortedRoutines = Array.isArray(routines)
+        ? [...routines].sort((first, second) => {
+            const firstDate = first.date || "";
+            const secondDate = second.date || "";
+            if (firstDate !== secondDate) return firstDate.localeCompare(secondDate);
+            const firstTime = first.start_time || "23:59";
+            const secondTime = second.start_time || "23:59";
+            return firstTime.localeCompare(secondTime);
+        })
+        : [];
 
-    if (!routines.length) {
+    if (remember) {
+        latestPlannerPreviewRoutines = sortedRoutines;
+        sessionStorage.setItem("arc_latest_planner_preview", JSON.stringify(latestPlannerPreviewRoutines));
+    }
+
+    if (!sortedRoutines.length) {
+        breakdownContainer.classList.remove("has-generated-routines");
+        breakdownContainer.innerHTML = `<div class="generated-placeholder">Generated tasks will appear here.</div>`;
         return;
     }
 
-    dedupeRoutines(routines).forEach((routine) => {
+    breakdownContainer.classList.add("has-generated-routines");
+
+    sortedRoutines.forEach((routine) => {
         const card = document.createElement("div");
         card.className = "breakdown-card";
         card.innerHTML = `
             <h4>${routine.title}</h4>
             <div class="routine-meta">
                 <span class="tag ${routine.priority.toLowerCase()}">${routine.priority}</span>
+                <span class="tag ${routine.status === "Completed" ? "completed" : "pending"}">${routine.status || "Pending"}</span>
                 <span class="tag info">${routine.date}</span>
-                <span class="tag info">${formatTime(routine.start_time)} - ${formatTime(routine.end_time)}</span>
+                <span class="tag time-badge">${formatTime(routine.start_time)} - ${formatTime(routine.end_time)}</span>
             </div>
             <div>${routine.suggestion || "Planned with a practical time block."}</div>
         `;
         breakdownContainer.appendChild(card);
     });
+    breakdownContainer.hidden = false;
+
+};
+
+const saveGeneratedRoutines = async (routines = []) => {
+    const savedRoutines = [];
+    for (const routine of routines) {
+        const savedRoutine = await fetchJson(`${API_BASE}/routines`, {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({
+                title: routine.title,
+                description: routine.description || null,
+                date: routine.date,
+                start_time: routine.start_time || null,
+                end_time: routine.end_time || null,
+                priority: routine.priority || "Medium",
+                status: routine.status || "Pending",
+                estimated_time: routine.estimated_time || 60,
+                suggestion: routine.suggestion || null,
+            }),
+        });
+        savedRoutines.push(savedRoutine);
+        upsertRoutineInState(savedRoutine);
+    }
+    calculateStats(dashboardState.routines);
+    renderDashboardState();
+    return savedRoutines;
 };
 
 const renderStats = (stats) => {
@@ -500,12 +552,17 @@ const renderDashboardState = () => {
         renderStats(dashboardState.stats);
     renderRoutines(dashboardState.routines, dashboardState.weeklyRoutines);
     renderOverview();
+    const breakdownContainer = document.getElementById("plannerBreakdown");
+    if (latestPlannerPreviewRoutines.length && !breakdownContainer?.classList.contains("has-generated-routines")) {
+        renderPlannerBreakdown(latestPlannerPreviewRoutines, { remember: false });
+    }
     document.querySelectorAll(".clickable-stat").forEach((card) => {
         card.classList.toggle("active", card.dataset.filterTarget === dashboardState.activeStatFilter);
     });
 };
 
-const loadDashboard = async () => {
+const loadDashboard = async ({ keepPlannerPreview = true, preserveScroll = false } = {}) => {
+    const scrollPosition = preserveScroll ? { x: window.scrollX, y: window.scrollY } : null;
     try {
         const [stats, routines, weeklyRoutines] = await Promise.all([
             fetchJson(`${API_BASE}/dashboard/stats`, { headers: authHeaders() }),
@@ -517,6 +574,12 @@ const loadDashboard = async () => {
         dashboardState.weeklyRoutines = dedupeRoutines(weeklyRoutines);
         calculateStats(dashboardState.routines);
         renderDashboardState();
+        if (keepPlannerPreview && latestPlannerPreviewRoutines.length) {
+            renderPlannerBreakdown(latestPlannerPreviewRoutines, { remember: false });
+        }
+        if (scrollPosition) {
+            requestAnimationFrame(() => window.scrollTo(scrollPosition.x, scrollPosition.y));
+        }
     } catch (error) {
         if (error.message.toLowerCase().includes("credentials")) {
             localStorage.clear();
@@ -560,7 +623,6 @@ document.getElementById("routineForm").addEventListener("submit", async (event) 
         renderDashboardState();
         setMessage("routineMessage", routineId ? "Routine updated." : "Routine created.");
         resetRoutineForm();
-        await loadDashboard();
     } catch (error) {
         setMessage("routineMessage", error.message, "error");
     }
@@ -573,10 +635,15 @@ document.getElementById("resetRoutineForm").addEventListener("click", () => {
 
 document.getElementById("aiPlannerForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const form = event.currentTarget;
+    delete form.dataset.submittedByVoice;
     const tipsContainer = document.getElementById("aiSuggestions");
     const breakdownContainer = document.getElementById("plannerBreakdown");
     tipsContainer.innerHTML = "";
-    breakdownContainer.innerHTML = "";
+    latestPlannerPreviewRoutines = [];
+    sessionStorage.removeItem("arc_latest_planner_preview");
+    renderPlannerBreakdown([], { remember: false });
+    window.clearTimeout(plannerBreakdownTimer);
 
     try {
         const result = await fetchJson(`${API_BASE}/generate-routine`, {
@@ -589,10 +656,14 @@ document.getElementById("aiPlannerForm").addEventListener("submit", async (event
         });
 
         setMessage("plannerMessage", result.summary);
-        renderPlannerBreakdown(result.routines || []);
+        const generatedRoutines = result.routines || [];
+        renderPlannerBreakdown(generatedRoutines);
         tipsContainer.innerHTML = "";
         document.getElementById("plannerInput").value = "";
-        await loadDashboard();
+        if (generatedRoutines.length) {
+            await saveGeneratedRoutines(generatedRoutines);
+            renderPlannerBreakdown(generatedRoutines, { remember: false });
+        }
     } catch (error) {
         setMessage("plannerMessage", error.message, "error");
     }
@@ -657,4 +728,7 @@ window.addEventListener("hashchange", syncViewFromHash);
 window.initializeVoiceInput("voiceButton", "plannerInput", "voiceSendButton", "voiceStatus");
 resetRoutineForm();
 syncViewFromHash();
+if (latestPlannerPreviewRoutines.length) {
+    renderPlannerBreakdown(latestPlannerPreviewRoutines, { remember: false });
+}
 loadDashboard();

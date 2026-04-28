@@ -49,30 +49,28 @@ AutomatedRoutineCreator/
 - Productivity dashboard statistics
 - Project management workspace with table, board, calendar, and gantt-style timeline views
 - Workspace invitations by email, pending invite actions, and live member lists
-- MySQL-compatible SQLAlchemy models
+- PostgreSQL/Supabase-ready SQLAlchemy models
 - Responsive SaaS-inspired UI with glassmorphism styling
 
-## MySQL Setup Guide
+## Supabase PostgreSQL Setup Guide
 
-1. Open MySQL Workbench and connect to your local MySQL server.
-2. Run the following SQL:
-
-```sql
-CREATE DATABASE automated_routine_creator;
-```
-
-3. Copy [backend/.env.example](/c:/Users/Dell/OneDrive/Desktop/Project/AutomatedRoutineCreator/backend/.env.example) to `backend/.env`.
-4. Update `DATABASE_URL` with your MySQL username and password:
+1. Create a Supabase project.
+2. Open Supabase project settings and copy the PostgreSQL connection string.
+3. Update [backend/.env](/c:/Users/Dell/OneDrive/Desktop/Project/AutomatedRoutineCreator/backend/.env) with your Supabase values:
 
 ```env
-DATABASE_URL=mysql+pymysql://root:your_mysql_password@localhost:3306/automated_routine_creator
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+DATABASE_URL=postgresql+psycopg2://postgres:[YOUR-PASSWORD]@db.[YOUR-PROJECT-REF].supabase.co:5432/postgres
 SECRET_KEY=replace-this-with-a-secure-random-string
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
 FRONTEND_ORIGIN=*
 ```
 
-5. Tables are created automatically when the backend starts.
+4. Tables are created automatically by SQLAlchemy when the backend starts.
+5. Optional SQL helper scripts in [backend/sql](/c:/Users/Dell/OneDrive/Desktop/Project/AutomatedRoutineCreator/backend/sql) use PostgreSQL syntax.
 
 ## Run Instructions
 
@@ -120,7 +118,7 @@ python -m http.server 5500
 ## AI Logic Integration
 
 - The backend uses a built-in heuristic planner by default, so it works without any paid API.
-- If you add `OPENAI_API_KEY` to `backend/.env`, the app will call an LLM endpoint and fall back to the heuristic planner if the request fails.
+- If you add `GROQ_API_KEY` to `backend/.env`, the app will call Groq chat completions for AI planning and Groq Whisper for voice transcription. It falls back to the heuristic planner if chat generation fails.
 - Generated routines are automatically saved into the database after `POST /generate-routine`.
 
 ## OTP Email Setup

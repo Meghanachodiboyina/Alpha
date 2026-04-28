@@ -11,6 +11,95 @@ from .schemas import (
     WorkspaceAIGeneratedTask,
 )
 
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+GROQ_WHISPER_MODEL = "whisper-large-v3"
+
+
+def _groq_headers() -> dict[str, str] | None:
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return None
+    return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+
+def _groq_model() -> str:
+    return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+
+async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: float = 0.35) -> dict | None:
+    headers = _groq_headers()
+    if not headers:
+        return None
+
+    payload = {
+        "model": _groq_model(),
+        "messages": messages,
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            response = await client.post(GROQ_CHAT_COMPLETIONS_URL, headers=headers, json=payload)
+            response.raise_for_status()
+        raw_content = response.json()["choices"][0]["message"]["content"]
+        return json.loads(raw_content)
+    except Exception:
+        return None
+
+
+def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -> dict | None:
+    headers = _groq_headers()
+    if not headers:
+        return None
+
+    payload = {
+        "model": _groq_model(),
+        "messages": messages,
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        with httpx.Client(timeout=35.0) as client:
+            response = client.post(GROQ_CHAT_COMPLETIONS_URL, headers=headers, json=payload)
+            response.raise_for_status()
+        raw_content = response.json()["choices"][0]["message"]["content"]
+        return json.loads(raw_content)
+    except Exception:
+        return None
+
+
+async def transcribe_audio_with_groq(
+    audio_bytes: bytes,
+    filename: str = "voice.webm",
+    content_type: str = "audio/webm",
+) -> str:
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key or not audio_bytes:
+        return ""
+
+    files = {
+        "file": (filename or "voice.webm", audio_bytes, content_type or "audio/webm"),
+    }
+    data = {
+        "model": GROQ_WHISPER_MODEL,
+        "response_format": "json",
+        "temperature": "0",
+        "language": "en",
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(GROQ_TRANSCRIPTIONS_URL, headers=headers, data=data, files=files)
+            response.raise_for_status()
+        transcript = response.json().get("text", "")
+        return re.sub(r"\s+", " ", str(transcript)).strip()
+    except Exception:
+        return ""
+
 TIME_HINTS = {
     "wake": time(6, 0),
     "wake up": time(6, 0),
@@ -71,32 +160,106 @@ def _combine(task_date: date, task_time: time) -> datetime:
 
 
 def _strip_leading_phrase(task: str) -> str:
-    cleaned = re.sub(
-        r"^\s*(i\s+(?:have to|need to|should|must|want to|had to)|please|today i need to|today i have to)\s+",
-        "",
-        task.strip(),
-        flags=re.IGNORECASE,
+    cleaned = task.strip()
+    filler_patterns = [
+        r"\bmy\s+work\s+is\s+",
+        r"\bmy\s+manager\s+(said|told\s+me|gave\s+me\s+work|asked\s+me)\s+(to\s+)?",
+        r"\b(today\s+)?i\s+(have\s+to|need\s+to|should|must|want\s+to|had\s+to|will)\s+",
+        r"\b(can\s+you|could\s+you)\s+(please\s+)?(help\s+me\s+)?(to\s+)?",
+        r"\bplease\s+",
+        r"\bwant\s+to\s+",
+    ]
+    for pattern in filler_patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(today|please|maybe)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if cleaned.strip().lower() in {"i need to", "i have to", "i should", "i want to", "my work is", "to"}:
+        return ""
+    return cleaned.strip(" .,-")
+
+
+def _clean_planner_title(task: str) -> str:
+    cleaned = _strip_leading_phrase(task)
+    cleaned = re.sub(r"\b(today|tomorrow|morning|afternoon|evening|night|tonight)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bbefore\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\battend\s+a\s+meeting\b", "attend meeting", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bgo\s+to\s+the\s+gym\b", "go to gym", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,-")
+    if not cleaned:
+        cleaned = "Planned Task"
+    small_words = {"to", "in", "for", "with", "of", "the", "a", "an", "at", "on"}
+    title_words = []
+    for index, word in enumerate(cleaned.split()):
+        if index > 0 and word.lower() in small_words:
+            title_words.append(word.lower())
+        else:
+            title_words.append(word if word.isupper() else word.capitalize())
+    return (
+        " ".join(title_words)
+        .replace("Fastapi", "FastAPI")
+        .replace("Api", "API")
+        .replace("Ui", "UI")
+        .replace("Sql", "SQL")
     )
-    return cleaned.strip(" .")
 
 
 def _extract_tasks(input_text: str) -> list[str]:
-    normalized = re.sub(r"[\r\n]+", ". ", input_text)
-    normalized = re.sub(
-        r"\s+(?=(?:i\s+(?:have to|need to|should|must|want to|had to)))",
-        ", ",
-        normalized,
-        flags=re.IGNORECASE,
+    normalized = re.sub(r"[\r\n]+", ", ", input_text.strip())
+    voice_corrections = {
+        r"\bbacon\b": "backend",
+        r"\bback end\b": "backend",
+        r"\bfront hand\b": "frontend",
+        r"\bdata bass\b": "database",
+        r"\bdata base\b": "database",
+        r"\ba p i\b": "API",
+        r"\bfast api\b": "FastAPI",
+    }
+    for pattern, replacement in voice_corrections.items():
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bgo\s+to\s+the\s+gym\b", "go to gym", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bgo\s+gym\b", "go to gym", normalized, flags=re.IGNORECASE)
+    action_verbs = (
+        "wake|study|learn|cook|sleep|call|send|practice|wash|clean|buy|complete|finish|fix|"
+        "connect|create|update|deploy|book|pack|write|read|review|design|build|test|"
+        "attend|go|submit|prepare|exercise|pay|schedule|visit|make|plan|debug|implement|work"
     )
-    normalized = re.sub(r"\b(and then|then|also|after that|next)\b", ",", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\band\b(?=.*\b(?:study|project|meeting|gym|workout|cook|sleep|call|learn|practice)\b)", ",", normalized, flags=re.IGNORECASE)
-    chunks = re.split(r"[,.!;]+", normalized)
-    tasks = []
-    for chunk in chunks:
-        cleaned = _strip_leading_phrase(chunk)
-        if cleaned:
-            tasks.append(cleaned)
-    return tasks or [input_text.strip()]
+
+    def split_chunk_on_actions(chunk: str) -> list[str]:
+        cleaned_chunk = _strip_leading_phrase(chunk)
+        if not cleaned_chunk:
+            return []
+
+        action_pattern = re.compile(rf"\b(?:{action_verbs})\b", flags=re.IGNORECASE)
+        matches = list(action_pattern.finditer(cleaned_chunk))
+        if len(matches) <= 1:
+            return [cleaned_chunk]
+
+        segments: list[str] = []
+        for index, match in enumerate(matches):
+            start = match.start()
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(cleaned_chunk)
+            segment = cleaned_chunk[start:end].strip(" ,.;")
+            if segment:
+                segments.append(segment)
+        return segments
+
+    normalized = re.sub(r"\b(and then|then|also|after that|afterwards|next|plus|along with)\b", ",", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(rf"\s+\band\b\s+(?=\b(?:{action_verbs})\b)", ", ", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s*&\s*", ", ", normalized)
+    normalized = normalized.lstrip(" ,")
+
+    tasks: list[str] = []
+    seen: set[str] = set()
+    for chunk in re.split(r"[,;.!]+", normalized):
+        for task in split_chunk_on_actions(chunk):
+            cleaned = _strip_leading_phrase(task)
+            cleaned = re.sub(r"^(to|and|then|also)\b", "", cleaned, flags=re.IGNORECASE).strip(" .,-")
+            key = cleaned.lower()
+            if cleaned and key not in {"to", "and", "then", "also"} and key not in seen:
+                seen.add(key)
+                tasks.append(cleaned)
+    return tasks or [_strip_leading_phrase(input_text) or input_text.strip()]
 
 
 def _extract_explicit_time(task: str) -> time | None:
@@ -197,12 +360,7 @@ def _guess_start_time(task: str, current_slot: datetime) -> time:
 
 
 def _make_title(task: str) -> str:
-    cleaned = _strip_leading_phrase(task)
-    cleaned = re.sub(r"\b(today|tomorrow|before thursday|before friday)\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
-    if not cleaned:
-        cleaned = "Planned Task"
-    return cleaned[:1].upper() + cleaned[1:]
+    return _clean_planner_title(task)
 
 
 def _suggestion_for(task: str, priority: str) -> str:
@@ -295,24 +453,30 @@ def _find_next_available_start(
     return fallback_start
 
 
-def _build_schedule(tasks: list[str], plan_scope: str) -> list[AIPlannedRoutine]:
+def _normalize_priority(value: str | None, fallback_task: str) -> str:
+    if value:
+        normalized = value.strip().capitalize()
+        if normalized in {"High", "Medium", "Low"}:
+            return normalized
+    return _guess_priority(fallback_task)
+
+
+def _build_schedule(tasks: list[str | dict], plan_scope: str) -> list[AIPlannedRoutine]:
     planned_routines: list[AIPlannedRoutine] = []
     current_slot_by_date: dict[date, datetime] = {}
     occupied_slots_by_date: dict[date, list[tuple[datetime, datetime]]] = {}
 
-    sorted_tasks = sorted(
-        enumerate(tasks),
-        key=lambda item: (
-            _extract_target_date(item[1], plan_scope),
-            0 if _is_anchored_task(item[1]) else 1,
-            _priority_rank(item[1]),
-            _guess_start_time(item[1], datetime.combine(date.today(), time(8, 0))),
-        ),
-    )
-
-    for task_index, raw_task in sorted_tasks:
-        priority = _guess_priority(raw_task)
-        estimated_time = _guess_duration(raw_task)
+    for task_index, task_item in enumerate(tasks):
+        if isinstance(task_item, dict):
+            title_override = _clean_planner_title(str(task_item.get("title") or task_item.get("task") or ""))
+            raw_task = str(task_item.get("source_text") or task_item.get("raw_text") or task_item.get("context") or title_override)
+            priority = _normalize_priority(str(task_item.get("priority") or ""), raw_task)
+            estimated_time = int(task_item.get("estimated_time") or _guess_duration(raw_task))
+        else:
+            raw_task = task_item
+            title_override = _make_title(raw_task)
+            priority = _guess_priority(raw_task)
+            estimated_time = _guess_duration(raw_task)
         task_date = _assign_weekly_date(raw_task, task_index) if plan_scope == "weekly" else _extract_target_date(raw_task, plan_scope)
         occupied_slots = occupied_slots_by_date.setdefault(task_date, [])
         current_slot = current_slot_by_date.setdefault(task_date, datetime.combine(task_date, time(7, 0)))
@@ -327,7 +491,7 @@ def _build_schedule(tasks: list[str], plan_scope: str) -> list[AIPlannedRoutine]
 
         planned_routines.append(
             AIPlannedRoutine(
-                title=_make_title(raw_task),
+                title=title_override,
                 description=f"AI planned task based on user input: {raw_task}",
                 date=task_date,
                 start_time=start_dt.time().replace(second=0, microsecond=0),
@@ -339,7 +503,6 @@ def _build_schedule(tasks: list[str], plan_scope: str) -> list[AIPlannedRoutine]
             )
         )
 
-    planned_routines.sort(key=lambda routine: (routine.date, routine.start_time or time(23, 59)))
     return planned_routines
 
 
@@ -367,87 +530,78 @@ def generate_heuristic_plan(input_text: str, plan_scope: str) -> AIGenerationRes
 
 
 async def generate_ai_plan(input_text: str, plan_scope: str) -> AIGenerationResponse:
-    api_key = os.getenv("OPENAI_API_KEY")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-    if not api_key:
-        return generate_heuristic_plan(input_text, plan_scope)
-
     today = date.today().isoformat()
+    fallback_tasks = _extract_tasks(input_text)
     system_prompt = """
-    You are an expert AI productivity planner.
+    You are a senior productivity planner. Extract clean separate routine tasks from natural language.
 
-    Create a smart, realistic, time-blocked routine.
+    Return JSON only with:
+    {
+      "tasks": [
+        {
+          "title": "short clean professional task title",
+          "source_text": "the original phrase with date/time words preserved",
+          "priority": "High|Medium|Low",
+          "estimated_time": 30-240
+        }
+      ],
+      "productivity_tips": ["short useful tip"]
+    }
 
     Rules:
-    - Understand all user tasks
-    - Prioritize urgent and important tasks first
-    - Arrange tasks logically
-    - Start morning and end night
-    - Include breaks and meals
-    - Include gym, study, meetings, cooking, travel if mentioned
-    - Include sleep if mentioned
-    - Wake up early must be scheduled in the early morning, never around 9 AM
-    - Sleep early must be scheduled at a realistic night time like 9:30 PM to 10:30 PM
-    - Cooking should be placed near breakfast, lunch, or dinner
-    - Gym should default to evening unless the user clearly prefers another time
-    - Study and project work should be prioritized in the morning when possible
-    - Meetings must respect the exact user-provided time
-    - Avoid overlapping timings
-    - Keep suggestions directly relevant to each task
-    - Split combined user text into separate tasks instead of merging everything into one routine
-    - Make routine practical and balanced
-
-    Return valid JSON only with keys:
-    summary
-    productivity_tips
-    routines
-
-    Each routine must contain:
-    title
-    description
-    date
-    start_time
-    end_time
-    priority
-    status
-    estimated_time
-    suggestion
+    - Split every distinct action into its own task.
+    - Split by commas, and, then, also, next, plus, &, time mentions, repeated action verbs, and multiple goals.
+    - Never return one long combined task when multiple actions exist.
+    - Remove filler from title: today, tomorrow, morning, afternoon, evening, night, please, I need to, I have to.
+    - Keep date/time words only inside source_text so scheduling can use them.
+    - Titles must be short and clean, like "Study Python" or "Work on FastAPI Backend".
+    - Preserve prompt order unless a specific time makes a task naturally anchored.
+    - For "Work on FastAPI backend and work on frontend Swagger UI", return two tasks.
     """
 
     user_prompt = f"""
     Today's date is {today}
 
-    Create a {plan_scope} routine for:
+    Split this {plan_scope} routine request:
 
     {input_text}
     """
 
-    payload = {
-        "model": model,
-        "messages": [
+    parsed = await _groq_chat_json_async(
+        messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.3,
-        "response_format": {"type": "json_object"},
-    }
+        temperature=0.3,
+    )
+    if parsed:
+        raw_items = parsed.get("tasks") or []
+        groq_tasks: list[dict] = []
+        seen_titles: set[str] = set()
+        for item in raw_items:
+            title = _clean_planner_title(str(item.get("title") or item.get("task") or ""))
+            if not title or title.lower() in seen_titles:
+                continue
+            seen_titles.add(title.lower())
+            groq_tasks.append({
+                "title": title,
+                "source_text": str(item.get("source_text") or item.get("raw_text") or item.get("context") or title),
+                "priority": item.get("priority") or _guess_priority(title),
+                "estimated_time": item.get("estimated_time") or _guess_duration(title),
+            })
 
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=payload,
+        if groq_tasks and (len(fallback_tasks) <= 1 or len(groq_tasks) >= len(fallback_tasks)):
+            planned_routines = _build_schedule(groq_tasks[:8], plan_scope)
+            tips = parsed.get("productivity_tips") or [
+                "The routine was split into clear action blocks so each item is easier to complete."
+            ]
+            return AIGenerationResponse(
+                summary=f"Built a Groq-powered {plan_scope} routine with {len(planned_routines)} clean task blocks.",
+                productivity_tips=[str(tip) for tip in tips[:4]],
+                routines=planned_routines,
             )
-            response.raise_for_status()
-            raw_content = response.json()["choices"][0]["message"]["content"]
-            parsed = json.loads(raw_content)
-            return AIGenerationResponse.model_validate(parsed)
-    except Exception:
-        return generate_heuristic_plan(input_text, plan_scope)
+
+    return generate_heuristic_plan(input_text, plan_scope)
 
 
 def generate_workspace_ai_tasks(
@@ -455,9 +609,213 @@ def generate_workspace_ai_tasks(
     project_name: str = "Team Space",
     assignee: str | None = None,
 ) -> list[WorkspaceAIGeneratedTask]:
+    voice_corrections = {
+        r"\bbacon\b": "backend",
+        r"\bback end\b": "backend",
+        r"\bfront hand\b": "frontend",
+        r"\bfront end\b": "frontend",
+        r"\bdata bass\b": "database",
+        r"\bdata base\b": "database",
+        r"\bfast api\b": "FastAPI",
+        r"\ba p i\b": "API",
+        r"\bpost gray sql\b": "PostgreSQL",
+        r"\bsuper base\b": "Supabase",
+        r"\bauthentification\b": "authentication",
+    }
+
     prompt_clean = re.sub(r"\s+", " ", prompt.strip())
+    for pattern, replacement in voice_corrections.items():
+        prompt_clean = re.sub(pattern, replacement, prompt_clean, flags=re.IGNORECASE)
     subject = re.sub(r"^(build|create|make|design|develop|fix|implement)\s+", "", prompt_clean, flags=re.IGNORECASE).strip()
     subject = subject or prompt_clean
+    due_today = bool(re.search(r"\btoday\b", prompt_clean, flags=re.IGNORECASE))
+
+    priority_keywords = {
+        "High": {"urgent", "important", "deadline", "backend", "bug", "bugfix", "critical", "fix", "production", "api", "database", "deploy", "meeting", "exam", "payment", "bill"},
+        "Medium": {"development", "develop", "ui", "frontend", "integration", "testing", "test", "feature", "build", "connect", "study", "workout", "travel", "shopping"},
+        "Low": {"documentation", "docs", "cleanup", "optional", "refactor", "polish", "laundry", "groceries", "clean"},
+    }
+
+    def infer_main_task_priority(text: str) -> str:
+        lowered = text.lower()
+        for priority, keywords in priority_keywords.items():
+            if any(keyword in lowered for keyword in keywords):
+                return priority
+        return "Medium"
+
+    quote_catalog = {
+        "coding": [
+            "Clean code today saves debugging tomorrow.",
+            "Readable code moves teams faster.",
+        ],
+        "bug": [
+            "Every bug solved sharpens the product.",
+            "Small fixes create stronger releases.",
+        ],
+        "testing": [
+            "Quality is built before release day.",
+            "Reliable tests protect confident changes.",
+        ],
+        "deployment": [
+            "Smooth releases come from careful preparation.",
+            "Stable launches reward disciplined checks.",
+        ],
+        "meetings": [
+            "Clear decisions move teams faster.",
+            "Focused meetings turn discussion into action.",
+        ],
+        "documentation": [
+            "Good docs save future hours.",
+            "Clear notes reduce tomorrow's confusion.",
+        ],
+        "ui": [
+            "Great interfaces feel effortless.",
+            "Thoughtful UI reduces user friction.",
+        ],
+        "database": [
+            "Strong data design prevents future chaos.",
+            "Clean schemas keep products scalable.",
+        ],
+        "planning": [
+            "A clear roadmap speeds execution.",
+            "Better plans create calmer delivery.",
+        ],
+        "learning": [
+            "Every new skill increases your value.",
+            "Consistent learning compounds into expertise.",
+        ],
+        "fitness": [
+            "Consistent movement builds lasting energy.",
+            "Discipline in fitness strengthens every day.",
+        ],
+        "home": [
+            "A clear space creates a calmer mind.",
+            "Small routines keep life lighter.",
+        ],
+        "shopping": [
+            "Prepared lists make smarter shopping.",
+            "Simple errands feel better when organized.",
+        ],
+        "travel": [
+            "Good travel starts with thoughtful planning.",
+            "Prepared journeys feel effortless.",
+        ],
+        "fallback": [
+            "Small focused progress compounds quickly.",
+            "Smart execution turns ideas into outcomes.",
+            "Precision today creates momentum tomorrow.",
+            "Clear work beats busy work.",
+            "Focused effort builds better products.",
+        ],
+    }
+
+    used_quotes: set[str] = set()
+
+    def task_quote(title: str) -> str:
+        lowered = title.lower()
+        if any(word in lowered for word in ("bug", "fix", "error", "issue", "debug")):
+            category = "bug"
+        elif any(word in lowered for word in ("test", "qa", "quality", "verify", "validation")):
+            category = "testing"
+        elif any(word in lowered for word in ("deploy", "release", "publish", "launch")):
+            category = "deployment"
+        elif any(word in lowered for word in ("meeting", "call", "review", "discussion", "standup")):
+            category = "meetings"
+        elif any(word in lowered for word in ("doc", "readme", "note", "documentation")):
+            category = "documentation"
+        elif any(word in lowered for word in ("ui", "ux", "screen", "interface", "design", "frontend")):
+            category = "ui"
+        elif any(word in lowered for word in ("database", "schema", "sql", "postgres", "mysql", "supabase", "data")):
+            category = "database"
+        elif any(word in lowered for word in ("plan", "roadmap", "requirement", "scope")):
+            category = "planning"
+        elif any(word in lowered for word in ("learn", "study", "practice", "course")):
+            category = "learning"
+        elif any(word in lowered for word in ("gym", "workout", "exercise", "run", "walk", "yoga", "fitness")):
+            category = "fitness"
+        elif any(word in lowered for word in ("wash", "clean", "cook", "laundry", "room", "home")):
+            category = "home"
+        elif any(word in lowered for word in ("buy", "shop", "shopping", "groceries", "purchase")):
+            category = "shopping"
+        elif any(word in lowered for word in ("travel", "trip", "book", "pack", "flight", "hotel")):
+            category = "travel"
+        elif any(word in lowered for word in ("code", "api", "backend", "fastapi", "connect", "build", "implement", "develop")):
+            category = "coding"
+        else:
+            category = "fallback"
+
+        for quote in quote_catalog[category] + quote_catalog["fallback"]:
+            if quote not in used_quotes:
+                used_quotes.add(quote)
+                return quote
+        return "Focused software work creates lasting momentum."
+
+    def strip_filler_text(text: str) -> str:
+        cleaned = text.strip(" .,-")
+        filler_patterns = [
+            r"\bmy\s+manager\s+(said|told\s+me|gave\s+me\s+work|give\s+me\s+work|asked\s+me)\s+(to\s+)?",
+            r"\bmanager\s+(said|told\s+me|gave\s+me\s+work|give\s+me\s+work|asked\s+me)\s+(to\s+)?",
+            r"\b(can\s+you|could\s+you)\s+(please\s+)?(make|do|help\s+me\s+with)\s+",
+            r"\b(today\s+)?(i\s+)?(have\s+to|need\s+to|must|should|want\s+to|will|am\s+going\s+to|gotta)\s+",
+            r"\bplease\s+(complete|do|make)\s+",
+            r"\bgive\s+me\s+work\s+(to\s+)?",
+            r"\blike\s+(this\s+)?",
+            r"\bmaybe\s+",
+        ]
+        for pattern in filler_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(today|tomorrow|this week)\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bbackend\s+auth\b", "backend authentication", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^(to|and|then|also)\b", "", cleaned, flags=re.IGNORECASE)
+        return re.sub(r"\s+", " ", cleaned).strip(" .,-")
+
+    def clean_main_task(text: str) -> str:
+        cleaned = strip_filler_text(text)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,-")
+        if not cleaned or cleaned.lower() in {"to", "and", "then", "also"}:
+            return ""
+        words = cleaned.split()
+        small_words = {"on", "to", "in", "for", "with", "of", "the", "a", "an"}
+        title_words = []
+        for index, word in enumerate(words):
+            if index > 0 and word.lower() in small_words:
+                title_words.append(word.lower())
+            else:
+                title_words.append(word if word.isupper() else word.capitalize())
+        title = " ".join(title_words)
+        title = (
+            title.replace("Fastapi", "FastAPI")
+            .replace("Api", "API")
+            .replace("Ui", "UI")
+            .replace("Db", "DB")
+        )
+        return title[:120]
+
+    def split_main_tasks(text: str) -> list[str]:
+        action_verbs = (
+            "complete|finish|fix|connect|create|update|deploy|wash|clean|buy|study|learn|attend|"
+            "book|pack|cook|visit|submit|prepare|write|read|practice|exercise|pay|schedule|call|"
+            "review|design|build|develop|implement|test|debug|shop|plan|go"
+        )
+        prepared = strip_filler_text(text)
+        prepared = re.sub(
+            r"\b(then|also|after that|afterwards|plus|along with)\b",
+            ",",
+            prepared,
+            flags=re.IGNORECASE,
+        )
+        prepared = re.sub(rf"\s+\b({action_verbs})\b", r", \1", prepared, flags=re.IGNORECASE)
+        prepared = prepared.lstrip(" ,")
+        parts = [clean_main_task(part) for part in re.split(r",|;|\n|&|\band\b|\bafter\b", prepared, flags=re.IGNORECASE)]
+        unique_parts: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            key = part.lower()
+            if part and key not in seen:
+                seen.add(key)
+                unique_parts.append(part)
+        fallback = clean_main_task(text)
+        return unique_parts[:5] or ([fallback] if fallback else [clean_main_task(subject)])
 
     def normalize_generated_items(items: list[dict]) -> list[WorkspaceAIGeneratedTask]:
         normalized_items: list[WorkspaceAIGeneratedTask] = []
@@ -466,246 +824,58 @@ def generate_workspace_ai_tasks(
             if not title:
                 continue
             priority = str(item.get("priority") or "Medium").strip().capitalize()
-            if priority not in {"Low", "Medium", "High", "Urgent"}:
+            if priority not in {"Low", "Medium", "High"}:
                 priority = "Medium"
-            description = str(item.get("description") or item.get("details") or f"Complete {title.lower()} for {subject}.").strip()
+            description = str(item.get("description") or item.get("quote") or task_quote(title)).strip()
             normalized_items.append(
                 WorkspaceAIGeneratedTask(
-                    title=title[:120],
-                    description=description[:500],
+                    title=clean_main_task(title)[:120],
+                    description=description[:220],
                     assignee=assignee or "Unassigned",
                     priority=priority,
                     status="Todo",
-                    due_date=date.today() + timedelta(days=index),
+                    due_date=date.today() if due_today else date.today() + timedelta(days=index),
                     progress=0,
                     project_name=project_name,
                 )
             )
         return normalized_items
 
-    def generate_with_openai() -> list[WorkspaceAIGeneratedTask]:
-        api_key = os.getenv("OPENAI_API_KEY")
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        if not api_key:
-            return []
-
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a senior corporate project manager. Convert the user prompt into 2 to 5 realistic, "
-                        "specific, actionable workspace tasks. Avoid generic Plan/Build/Review patterns unless they "
-                        "are genuinely appropriate. Return JSON only: {\"tasks\":[{\"title\":\"...\","
-                        "\"description\":\"...\",\"priority\":\"Low|Medium|High|Urgent\"}]}"
-                    ),
-                },
-                {"role": "user", "content": prompt_clean},
-            ],
-            "temperature": 0.65,
-            "response_format": {"type": "json_object"},
-        }
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-                response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
-                parsed = json.loads(content)
-            return normalize_generated_items(parsed.get("tasks", []))
-        except Exception:
-            return []
-
-    openai_tasks = generate_with_openai()
-    if openai_tasks:
-        return openai_tasks
-
-    stage_templates = {
-        "learning": [
-            ("Map learning outcomes", "Define the core skills, resources, and measurable outcomes for the learning goal."),
-            ("Complete fundamentals practice", "Work through the essential concepts with short notes and examples."),
-            ("Build hands-on exercises", "Create small practice programs or exercises to turn concepts into skill."),
-            ("Apply learning in a mini project", "Use the new skill in a realistic project that can be reviewed or demonstrated."),
+    groq_result = _groq_chat_json(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior productivity assistant. Extract only real actionable tasks from natural text "
+                    "across software, office work, study, home routines, fitness, shopping, meetings, travel, and "
+                    "mixed personal tasks. Remove filler like manager said, I need to, please do, can you help, and "
+                    "today I want. Create exactly as many main tasks as the user mentioned, up to 5. Do not create "
+                    "subtasks or step-by-step breakdown. Each description must be one short premium quote related "
+                    "to the task type, never repeat the task title, and never use generic completion filler. "
+                    "Return JSON only: {\"tasks\":[{\"title\":\"...\",\"description\":\"short smart quote\","
+                    "\"priority\":\"Low|Medium|High\"}]}"
+                ),
+            },
+            {"role": "user", "content": prompt_clean},
         ],
-        "website": [
-            ("Define website scope and sitemap", "Clarify pages, user journeys, content needs, and success criteria."),
-            ("Design responsive UI screens", "Create the visual layout, spacing, components, and mobile/tablet behavior."),
-            ("Develop frontend pages", "Build the website pages with reusable components and polished states."),
-            ("Connect backend and forms", "Wire APIs, validations, submissions, and data flows where needed."),
-            ("Test and deploy website", "Run browser checks, fix issues, and publish the site with final smoke testing."),
-        ],
-        "office": [
-            ("Capture business requirements", "Document stakeholders, objectives, constraints, and expected deliverables."),
-            ("Prepare project documentation", "Create the working notes, timeline, ownership, and approval checklist."),
-            ("Execute assigned deliverables", "Complete the development or operational work according to priority."),
-            ("Review progress with team", "Share status, collect feedback, resolve blockers, and align next steps."),
-            ("Finalize handoff package", "Prepare final files, summary, and delivery notes for stakeholders."),
-        ],
-        "frontend": [
-            ("Plan frontend screens", "Outline page structure, user flow, and responsive sections."),
-            ("Implement frontend UI", "Build the interface and reusable visual components."),
-            ("Polish frontend states", "Refine empty states, loading states, and validation feedback."),
-        ],
-        "backend": [
-            ("Design backend APIs", "Define the required endpoints, payloads, and validation rules."),
-            ("Implement backend logic", "Build route handlers, services, and persistence logic."),
-            ("Verify backend flows", "Test API responses, edge cases, and failure handling."),
-        ],
-        "testing": [
-            ("Prepare test scenarios", "List core user flows, edge cases, and expected results."),
-            ("Run functional testing", "Validate the main workflow across frontend and backend."),
-            ("Fix QA findings", "Resolve bugs or regressions found during testing."),
-        ],
-        "deployment": [
-            ("Prepare deployment config", "Set environment values, secrets, and deployment settings."),
-            ("Deploy application", "Release the latest build to the target environment."),
-            ("Run post-deploy checks", "Confirm health, logs, and smoke-test key workflows."),
-        ],
-        "database": [
-            ("Design database schema", "Define tables, relations, and indexes needed for the feature."),
-            ("Implement database changes", "Create migrations or schema updates and connect them to the app."),
-        ],
-        "api": [
-            ("Define API contract", "Document the request and response format before implementation."),
-            ("Integrate API endpoints", "Connect the client workflow to the required API calls."),
-        ],
-        "ui": [
-            ("Design UI flow", "Plan layout, spacing, and user interaction states."),
-            ("Build UI components", "Create the required interface elements and interactions."),
-        ],
-        "docs": [
-            ("Write implementation notes", "Document setup steps, assumptions, and usage details."),
-            ("Clean up project documentation", "Update README or handoff notes for the latest flow."),
-        ],
-        "bug": [
-            ("Investigate bug cause", "Trace the root cause and affected workflows."),
-            ("Implement bug fix", "Apply the fix and verify the broken path is resolved."),
-        ],
-    }
+        temperature=0.55,
+    )
+    if groq_result:
+        groq_tasks = normalize_generated_items(groq_result.get("tasks", []))
+        if groq_tasks:
+            return groq_tasks
 
-    priority_keywords = {
-        "High": {"urgent", "important", "deadline", "backend", "bug", "bugfix", "critical", "fix", "production", "api"},
-        "Medium": {"development", "develop", "ui", "frontend", "integration", "testing", "test", "feature", "build"},
-        "Low": {"documentation", "docs", "cleanup", "optional", "refactor", "polish"},
-    }
-
-    def infer_priority(text: str) -> str:
-        lowered = text.lower()
-        for priority, keywords in priority_keywords.items():
-            if any(keyword in lowered for keyword in keywords):
-                return priority
-        return "Medium"
-
-    def normalize_clause(text: str) -> str:
-        return re.sub(r"\s+", " ", text.strip(" .,-")).strip()
-
-    def split_prompt_into_workstreams(text: str) -> list[str]:
-        prepared = re.sub(r"\b(with|including|covering|plus|then)\b", ",", text, flags=re.IGNORECASE)
-        raw_parts = [
-            normalize_clause(part)
-            for part in re.split(r",|;|\n|\band\b|&", prepared, flags=re.IGNORECASE)
-        ]
-        parts = [part for part in raw_parts if part]
-        if len(parts) > 1:
-            return parts
-        return [normalize_clause(text)]
-
-    def classify_workstream(text: str) -> str | None:
-        lowered = text.lower()
-        if any(word in lowered for word in ("learn", "study", "course", "python", "java", "skill", "training")):
-            return "learning"
-        if any(word in lowered for word in ("website", "landing page", "web app", "site")):
-            return "website"
-        if any(word in lowered for word in ("office", "client", "corporate", "stakeholder", "delivery", "documentation")):
-            return "office"
-        for key in stage_templates:
-            if key in lowered:
-                return key
-        if "doc" in lowered:
-            return "docs"
-        if "deploy" in lowered or "release" in lowered:
-            return "deployment"
-        if "qa" in lowered:
-            return "testing"
-        return None
-
-    def build_generic_breakdown(text: str) -> list[tuple[str, str]]:
-        noun_phrase = re.sub(r"^(build|create|make|design|develop|implement|fix)\s+", "", text, flags=re.IGNORECASE).strip()
-        noun_phrase = noun_phrase or text or subject
-        noun_phrase = noun_phrase[0].upper() + noun_phrase[1:]
-        lowered = text.lower()
-        if any(word in lowered for word in ("learn", "study", "understand", "practice")):
-            return [
-                (f"Identify learning path for {noun_phrase}", f"Break {text} into fundamentals, practice areas, and outcome goals."),
-                (f"Practice core concepts of {noun_phrase}", f"Complete focused exercises and examples for the most important concepts."),
-                (f"Create a practical {noun_phrase} project", f"Apply the learning in a small real-world deliverable."),
-            ]
-        if any(word in lowered for word in ("launch", "release", "publish")):
-            return [
-                (f"Confirm launch requirements for {noun_phrase}", f"Validate scope, owners, risks, and readiness criteria for {text}."),
-                (f"Prepare launch assets for {noun_phrase}", f"Finalize build, content, configuration, and stakeholder approvals."),
-                (f"Run launch validation for {noun_phrase}", f"Test the release path, fix blockers, and confirm post-launch checks."),
-            ]
-        return [
-            (f"Clarify requirements for {noun_phrase}", f"Define expected outcome, dependencies, risks, and acceptance criteria for {text}."),
-            (f"Execute core work for {noun_phrase}", f"Complete the main practical deliverables required for {text}."),
-            (f"Validate and hand off {noun_phrase}", f"Check quality, document decisions, and prepare the final handoff for {text}."),
-        ]
-
-    workstreams = split_prompt_into_workstreams(subject)
-    seen_titles: set[str] = set()
-    task_items: list[WorkspaceAIGeneratedTask] = []
-    current_day_offset = 1
-
-    for stream in workstreams:
-        stream_type = classify_workstream(stream)
-        templates = stage_templates.get(stream_type, build_generic_breakdown(stream))
-        if len(workstreams) == 1 and stream_type in {"frontend", "backend", "testing", "deployment"}:
-            templates = templates[:2]
-
-        for title, description in templates:
-            unique_title = title
-            if unique_title.lower() in seen_titles:
-                unique_title = f"{title} for {stream[:40]}"
-            seen_titles.add(unique_title.lower())
-
-            priority = infer_priority(f"{stream} {title} {description}")
-            if priority == "High":
-                due_date = date.today() + timedelta(days=current_day_offset)
-            elif priority == "Medium":
-                due_date = date.today() + timedelta(days=current_day_offset + 1)
-            else:
-                due_date = date.today() + timedelta(days=current_day_offset + 2)
-
-            task_items.append(
-                WorkspaceAIGeneratedTask(
-                    title=unique_title,
-                    description=description.replace("the feature", stream).replace("the main workflow", stream),
-                    assignee=assignee or "Unassigned",
-                    priority=priority,
-                    status="Todo",
-                    due_date=due_date,
-                    progress=0,
-                    project_name=project_name,
-                )
-            )
-            current_day_offset += 1
-
-    if not task_items:
-        fallback = build_generic_breakdown(subject)
-        for index, (title, description) in enumerate(fallback, start=1):
-            task_items.append(
-                WorkspaceAIGeneratedTask(
-                    title=title,
-                    description=description,
-                    assignee=assignee or "Unassigned",
-                    priority=infer_priority(title),
-                    status="Todo",
-                    due_date=date.today() + timedelta(days=index),
-                    progress=0,
-                    project_name=project_name,
-                )
-            )
-
-    return task_items[:5]
+    main_tasks = split_main_tasks(prompt_clean)
+    return [
+        WorkspaceAIGeneratedTask(
+            title=title,
+            description=task_quote(title),
+            assignee=assignee or "Unassigned",
+            priority=infer_main_task_priority(title),
+            status="Todo",
+            due_date=date.today() if due_today else date.today() + timedelta(days=index),
+            progress=0,
+            project_name=project_name,
+        )
+        for index, title in enumerate(main_tasks, start=1)
+    ]

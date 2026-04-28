@@ -28,6 +28,7 @@ const state = {
     settings: null,
     activeProject: null,
     activeView: "table",
+    timelineRange: "today",
     activePage: "home",
     calendarDate: new Date(),
     filters: {
@@ -227,18 +228,7 @@ const renderAssignees = () => {
 
 const renderMembers = () => {
     $("workspaceMemberCountSidebar").textContent = `(${state.members.length})`;
-    $("workspaceSidebarMembers").innerHTML = state.members.length
-        ? state.members.map((member) => `
-            <button type="button" class="workspace-member-sidebar-row" data-member-email="${escapeHtml(member.email)}">
-                <span class="workspace-member-avatar mini">${escapeHtml(getInitials(member.name))}</span>
-                <span class="workspace-member-sidebar-copy">
-                    <strong class="workspace-member-sidebar-name">${escapeHtml(member.name)}</strong>
-                    <small>${state.tasks.filter((task) => task.assignee === member.name).length} assigned • ${state.tasks.filter((task) => task.assignee === member.name && task.status === "Completed").length} completed</small>
-                </span>
-                <i class="workspace-member-dot ${member.is_online ? "online" : "offline"}"></i>
-            </button>
-        `).join("")
-        : `<div class="empty-state">No members yet.</div>`;
+    $("workspaceSidebarMembers").innerHTML = "";
 };
 
 const renderTaskRow = (task) => `
@@ -359,37 +349,136 @@ const renderBoard = () => {
     $("workspaceDoneCount").textContent = String(tasks.filter((task) => task.status === "Completed").length);
 };
 
+const getDateKey = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+};
+
+const productivityScoreForTasks = (tasks = []) => {
+    if (!tasks.length) return 0;
+    const score = tasks.reduce((total, task) => {
+        if (task.status === "Completed") return total + 100;
+        if (task.status === "In Progress") return total + 45;
+        return total + 8;
+    }, 0);
+    return Math.round(score / tasks.length);
+};
+
+const buildTimelineSeries = (tasks, range) => {
+    const now = new Date();
+    const todayKey = getDateKey(now);
+    if (range === "today") {
+        const checkpoints = [8, 10, 12, 14, 16, 18, 20, 22].filter((hour) => hour <= Math.max(now.getHours(), 8));
+        const hours = checkpoints.length ? checkpoints : [now.getHours()];
+        const dueTasks = tasks.filter((task) => task.due_date === todayKey);
+        const weightedScore = productivityScoreForTasks(dueTasks);
+        return hours.map((hour) => ({
+            label: `${hour}:00`,
+            value: dueTasks.length ? Math.round(weightedScore * Math.min(1, Math.max(0.15, (hour + 1) / Math.max(now.getHours() + 1, 9)))) : 0,
+            count: dueTasks.length,
+        }));
+    }
+    if (range === "weekly") {
+        const monday = new Date(now);
+        const day = monday.getDay() || 7;
+        monday.setDate(monday.getDate() - day + 1);
+        return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, index) => {
+            const dayDate = new Date(monday);
+            dayDate.setDate(monday.getDate() + index);
+            const dayTasks = tasks.filter((task) => task.due_date === getDateKey(dayDate));
+            return { label, value: productivityScoreForTasks(dayTasks), count: dayTasks.length };
+        });
+    }
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const bucketSize = Math.ceil(daysInMonth / 4);
+    return [0, 1, 2, 3].map((bucket) => {
+        const start = bucket * bucketSize + 1;
+        const end = Math.min(daysInMonth, start + bucketSize - 1);
+        const bucketTasks = tasks.filter((task) => {
+            const taskDate = new Date(`${task.due_date}T00:00:00`);
+            return taskDate >= new Date(now.getFullYear(), now.getMonth(), start)
+                && taskDate <= new Date(now.getFullYear(), now.getMonth(), end);
+        });
+        return { label: `${start}-${end}`, value: productivityScoreForTasks(bucketTasks), count: bucketTasks.length };
+    });
+};
+
 const renderTimeline = () => {
     const tasks = getVisibleTasks().slice().sort((a, b) => a.due_date.localeCompare(b.due_date));
     const timeline = $("workspaceTimeline");
+    const filterMarkup = ["today", "weekly", "monthly"].map((range) => `
+        <button type="button" class="workspace-graph-filter ${state.timelineRange === range ? "active" : ""}" data-timeline-range="${range}">
+            ${range.charAt(0).toUpperCase() + range.slice(1)}
+        </button>
+    `).join("");
+
     if (!tasks.length) {
-        timeline.innerHTML = `<div class="empty-state">Timeline is empty until tasks are added.</div>`;
+        timeline.innerHTML = `
+            <section class="workspace-productivity-card">
+                <div class="workspace-graph-filters">${filterMarkup}</div>
+                <div class="empty-state">No task activity yet. Complete tasks to see growth.</div>
+            </section>
+        `;
         return;
     }
 
-    const dates = tasks.map((task) => new Date(`${task.due_date}T00:00:00`).getTime());
-    const min = Math.min(...dates);
-    const max = Math.max(...dates);
-    const range = Math.max(max - min, 86400000);
-
-    timeline.innerHTML = tasks.map((task) => {
-        const taskTime = new Date(`${task.due_date}T00:00:00`).getTime();
-        const offset = ((taskTime - min) / range) * 72;
-        const width = 24 + ((task.progress || 0) / 100) * 44;
-        return `
-            <article class="workspace-timeline-row">
-                <div class="workspace-timeline-meta">
-                    <strong>${escapeHtml(task.title)}</strong>
-                    <span>${escapeHtml(task.assignee)} • ${formatDate(task.due_date)}</span>
-                </div>
-                <div class="workspace-timeline-track">
-                    <span class="workspace-timeline-bar status-${task.status.toLowerCase().replace(/\s+/g, "-")}" style="margin-left:${offset}%; width:${width}px;"></span>
-                </div>
-            </article>
+    const series = buildTimelineSeries(tasks, state.timelineRange);
+    const hasActivity = series.some((point) => point.count > 0);
+    if (!hasActivity) {
+        timeline.innerHTML = `
+            <section class="workspace-productivity-card">
+                <div class="workspace-graph-filters">${filterMarkup}</div>
+                <div class="empty-state">No task activity yet. Complete tasks to see growth.</div>
+            </section>
         `;
-    }).join("");
-};
+        return;
+    }
 
+    const width = 720;
+    const height = 260;
+    const padding = 34;
+    const points = series.map((point, index) => {
+        const x = padding + (index * ((width - padding * 2) / Math.max(series.length - 1, 1)));
+        const y = height - padding - ((point.value / 100) * (height - padding * 2));
+        return { ...point, x, y };
+    });
+    const path = points.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" ");
+    const areaPath = `${path} L ${points.at(-1).x} ${height - padding} L ${points[0].x} ${height - padding} Z`;
+    const average = Math.round(series.reduce((sum, point) => sum + point.value, 0) / series.length);
+
+    timeline.innerHTML = `
+        <section class="workspace-productivity-card">
+            <header class="workspace-productivity-header">
+                <div>
+                    <p class="eyebrow">Timeline Analytics</p>
+                    <h4>Productivity Graph</h4>
+                    <span>Completion trend from real workspace task statuses.</span>
+                </div>
+                <strong>${average}%</strong>
+            </header>
+            <div class="workspace-graph-filters">${filterMarkup}</div>
+            <div class="workspace-graph-wrap">
+                <svg class="workspace-productivity-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="Productivity percentage graph">
+                    <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" />
+                    <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" />
+                    <path class="workspace-graph-area" d="${areaPath}" />
+                    <path class="workspace-graph-line" d="${path}" />
+                    ${points.map((point) => `
+                        <g class="workspace-graph-point" tabindex="0">
+                            <circle cx="${point.x}" cy="${point.y}" r="6"></circle>
+                            <title>${point.label}: ${point.value}% (${point.count} task${point.count === 1 ? "" : "s"})</title>
+                        </g>
+                    `).join("")}
+                    ${points.map((point) => `<text x="${point.x}" y="${height - 8}" text-anchor="middle">${escapeHtml(point.label)}</text>`).join("")}
+                    <text x="8" y="${padding + 5}">100%</text>
+                    <text x="14" y="${height - padding}">0%</text>
+                </svg>
+            </div>
+        </section>
+    `;
+};
 const renderCalendar = () => {
     const tasks = getVisibleTasks();
     const monthStart = new Date(state.calendarDate.getFullYear(), state.calendarDate.getMonth(), 1);
@@ -459,6 +548,15 @@ const renderAITasks = () => {
         `;
 };
 
+const getAITaskEstimate = (task) => {
+    const text = `${task.title} ${task.description || ""}`.toLowerCase();
+    if (text.includes("deploy") || text.includes("database") || text.includes("backend") || text.includes("api")) return "3 to 5 hours";
+    if (text.includes("bug") || text.includes("fix") || text.includes("test") || text.includes("qa")) return "1 to 2 hours";
+    if (text.includes("ui") || text.includes("design") || text.includes("frontend")) return "2 to 4 hours";
+    if (text.includes("meeting") || text.includes("documentation") || text.includes("docs")) return "45 to 90 minutes";
+    return "2 to 3 hours";
+};
+
 const renderAITaskGroups = () => {
     const groups = getProjectAITaskGroups();
     const totalTasks = groups.reduce((sum, group) => sum + (group.tasks?.length || 0), 0);
@@ -476,9 +574,13 @@ const renderAITaskGroups = () => {
                 <div class="workspace-ai-group-tasks">
                     ${(group.tasks || []).map((task) => `
                         <button type="button" class="workspace-ai-task-row" data-task-id="${task.id}">
-                            <span>${escapeHtml(task.project_name)}</span>
+                            <span class="workspace-ai-project-name">${escapeHtml(task.project_name)}</span>
                             <strong>${escapeHtml(task.title)}</strong>
-                            <small>${escapeHtml(task.assignee)} • ${escapeHtml(task.priority)} • ${formatDate(task.due_date)}</small>
+                            <small class="workspace-ai-quote">${escapeHtml(task.description || "Focused effort builds better products.")}</small>
+                            <div class="workspace-ai-meta-grid">
+                                <small class="workspace-ai-estimate">Estimated Time: ${escapeHtml(getAITaskEstimate(task))}</small>
+                                <small class="workspace-ai-priority">Priority: ${escapeHtml(task.priority)}</small>
+                            </div>
                         </button>
                     `).join("")}
                 </div>
@@ -553,17 +655,23 @@ const renderReports = () => {
 const renderInvites = () => {
     const pending = state.invites.filter((invite) => invite.status === "Pending");
     $("workspacePendingInviteCount").textContent = `${pending.length} pending`;
-    $("workspaceInviteList").innerHTML = state.invites.length
+    $("viewAllMembersButton").textContent = pending.length
+        ? `Invites (${pending.length})`
+        : "Invites";
+    const inviteMarkup = state.invites.length
         ? state.invites.map((invite) => `
             <article class="workspace-invite-row">
                 <div>
                     <strong>${escapeHtml(invite.invitee_email)}</strong>
-                    <small>${escapeHtml(invite.role || "Member")} • ${escapeHtml(invite.status)}</small>
+                    <small>${escapeHtml(invite.role || "Member")} • ${escapeHtml(invite.status)}${invite.created_at ? ` • ${new Date(invite.created_at).toLocaleDateString()}` : ""}</small>
                 </div>
                 <span class="workspace-badge">${escapeHtml(invite.status)}</span>
             </article>
         `).join("")
         : `<div class="empty-state">No invitations yet.</div>`;
+    $("workspaceInviteList").innerHTML = inviteMarkup;
+    const modalList = $("workspaceInviteModalList");
+    if (modalList) modalList.innerHTML = inviteMarkup;
 };
 
 const renderSettings = () => {
@@ -576,10 +684,11 @@ const renderSettings = () => {
 
     $("workspaceNameInput").value = settings.workspace_name || "Team Space";
     const theme = allowedWorkspaceThemes.includes(settings.theme) ? settings.theme : "ocean";
-    $("workspaceThemeInput").value = theme;
+    $("workspaceSettingsAccountName").textContent = currentUser?.name || "User";
+    $("workspaceSettingsAccountEmail").textContent = currentUser?.email || "No email available";
     $("workspaceNotificationsInput").checked = Boolean(settings.notifications_enabled);
     $("workspaceEmailNotificationsInput").checked = Boolean(settings.email_notifications_enabled);
-    $("workspaceSettingsStatus").textContent = `Theme: ${theme}`;
+    $("workspaceSettingsStatus").textContent = "Profile, account, notifications";
     document.body.dataset.workspaceTheme = theme;
 };
 
@@ -740,14 +849,20 @@ const saveTask = async (event) => {
     };
 
     try {
-        await fetchJson(taskId ? `${API_BASE}/workspace/tasks/${taskId}` : `${API_BASE}/workspace/tasks`, {
+        const savedTask = await fetchJson(taskId ? `${API_BASE}/workspace/tasks/${taskId}` : `${API_BASE}/workspace/tasks`, {
             method: taskId ? "PUT" : "POST",
             headers: authHeaders(),
             body: JSON.stringify(payload),
         });
+        if (taskId) {
+            state.tasks = state.tasks.map((task) => task.id === savedTask.id ? savedTask : task);
+            state.aiTasks = state.aiTasks.map((task) => task.id === savedTask.id ? savedTask : task);
+        } else {
+            state.tasks = [savedTask, ...state.tasks];
+        }
         closeDialog("workspaceTaskModal");
         setMessage(taskId ? "Task updated." : "Task created.");
-        await loadWorkspace();
+        renderAll();
     } catch (error) {
         setMessage(error.message, "error");
     }
@@ -755,13 +870,19 @@ const saveTask = async (event) => {
 
 const updateTask = async (taskId, patch, successMessage = "Task updated.") => {
     try {
-        await fetchJson(`${API_BASE}/workspace/tasks/${taskId}`, {
+        const updatedTask = await fetchJson(`${API_BASE}/workspace/tasks/${taskId}`, {
             method: "PUT",
             headers: authHeaders(),
             body: JSON.stringify(patch),
         });
+        state.tasks = state.tasks.map((task) => task.id === updatedTask.id ? updatedTask : task);
+        state.aiTasks = state.aiTasks.map((task) => task.id === updatedTask.id ? updatedTask : task);
+        state.aiTaskGroups = state.aiTaskGroups.map((group) => ({
+            ...group,
+            tasks: group.tasks.map((task) => task.id === updatedTask.id ? updatedTask : task),
+        }));
         setMessage(successMessage);
-        await loadWorkspace();
+        renderAll();
     } catch (error) {
         setMessage(error.message, "error");
     }
@@ -773,8 +894,13 @@ const deleteTask = async (taskId) => {
             method: "DELETE",
             headers: authHeaders(),
         });
+        state.tasks = state.tasks.filter((task) => task.id !== taskId);
+        state.aiTasks = state.aiTasks.filter((task) => task.id !== taskId);
+        state.aiTaskGroups = state.aiTaskGroups
+            .map((group) => ({ ...group, tasks: group.tasks.filter((task) => task.id !== taskId) }))
+            .filter((group) => group.tasks.length);
         setMessage("Task deleted.");
-        await loadWorkspace();
+        renderAll();
     } catch (error) {
         setMessage(error.message, "error");
     }
@@ -860,9 +986,21 @@ const handleAIGenerate = async (event) => {
         closeDialog("workspaceAIModal");
         $("workspaceAIPrompt").value = "";
         state.activeProject = $("workspaceAIProject").value || null;
+        state.tasks = [...(result.tasks || []), ...state.tasks];
+        state.aiTasks = [...(result.tasks || []), ...state.aiTasks];
+        if (result.tasks?.length) {
+            state.aiTaskGroups = [
+                {
+                    prompt,
+                    created_at: new Date().toISOString(),
+                    tasks: result.tasks,
+                },
+                ...state.aiTaskGroups,
+            ];
+        }
         setActivePage("aiTasks");
         setMessage(result.message || "AI tasks generated.");
-        await loadWorkspace();
+        renderAll();
     } catch (error) {
         setMessage(error.message, "error");
     } finally {
@@ -976,7 +1114,7 @@ const saveSettings = async (event) => {
             headers: authHeaders(),
             body: JSON.stringify({
                 workspace_name: $("workspaceNameInput").value.trim(),
-                theme: $("workspaceThemeInput").value,
+                theme: state.settings?.theme || "ocean",
                 notifications_enabled: $("workspaceNotificationsInput").checked,
                 email_notifications_enabled: $("workspaceEmailNotificationsInput").checked,
                 permission_mode: state.settings?.permission_mode || "members_edit",
@@ -1014,7 +1152,6 @@ $("workspaceUserAvatar").textContent = getInitials(currentUser?.name || "User");
 $("workspaceProfileAvatar").textContent = getInitials(currentUser?.name || "User");
 $("workspaceProfileName").textContent = currentUser?.name || "User";
 $("workspaceProfileEmail").textContent = currentUser?.email || "No email available";
-$("workspaceProfileRole").textContent = currentUser?.role || "Owner";
 
 const closeProfileMenu = () => {
     $("workspaceProfileMenu").hidden = true;
@@ -1025,6 +1162,33 @@ const toggleProfileMenu = () => {
     const menu = $("workspaceProfileMenu");
     menu.hidden = !menu.hidden;
     $("workspaceUserAvatar").setAttribute("aria-expanded", String(!menu.hidden));
+};
+
+const setupWorkspaceVoiceInput = ({ inputId, micId, sendId, statusId, formId, idleText }) => {
+    const input = $(inputId);
+    const mic = $(micId);
+    const send = $(sendId);
+    const status = $(statusId);
+    const form = $(formId);
+
+    if (!input || !mic || !send || !form) return;
+
+    if (!window.createGroqVoiceInput) {
+        mic.disabled = true;
+        send.disabled = !input.value.trim();
+        if (status) status.textContent = "Voice recorder could not load. Refresh and try again.";
+        return;
+    }
+
+    window.createGroqVoiceInput({
+        button: mic,
+        input,
+        sendButton: send,
+        status,
+        form,
+        idleText,
+        readyText: "Voice text ready. Click Send to submit.",
+    });
 };
 
 $("workspaceTaskForm").addEventListener("submit", saveTask);
@@ -1045,16 +1209,15 @@ $("workspaceAITasks").addEventListener("click", (event) => {
     const task = state.tasks.find((item) => item.id === Number(button.dataset.taskId));
     if (task) openTaskModal(task);
 });
+$("workspaceTimeline").addEventListener("click", (event) => {
+    const rangeButton = event.target.closest("[data-timeline-range]");
+    if (!rangeButton) return;
+    state.timelineRange = rangeButton.dataset.timelineRange || "today";
+    renderTimeline();
+});
 $("viewAllMembersButton").addEventListener("click", () => {
-    const nextPage = state.activePage === "invites" ? "home" : "invites";
-    setActivePage(nextPage);
-    if (nextPage === "home") {
-        state.activeProject = null;
-        state.activeView = "table";
-        renderAll();
-        return;
-    }
-    renderPages();
+    renderInvites();
+    openDialog("workspaceInvitesListModal");
 });
 $("openTaskModalButton").addEventListener("click", () => openTaskModal());
 $("openAIModalButton").addEventListener("click", () => {
@@ -1069,6 +1232,7 @@ $("closeAIModalButton").addEventListener("click", () => closeDialog("workspaceAI
 $("cancelAIModalButton").addEventListener("click", () => closeDialog("workspaceAIModal"));
 $("closeInviteModalButton").addEventListener("click", () => closeDialog("workspaceInviteModal"));
 $("cancelInviteModalButton").addEventListener("click", () => closeDialog("workspaceInviteModal"));
+$("closeInvitesListModalButton").addEventListener("click", () => closeDialog("workspaceInvitesListModal"));
 $("suggestEstimateButton").addEventListener("click", suggestEstimate);
 $("newProjectButton").addEventListener("click", createProject);
 $("newTeamSpaceButton").addEventListener("click", createTeamSpace);
@@ -1088,9 +1252,29 @@ $("workspaceProfileLogoutButton").addEventListener("click", () => {
     localStorage.clear();
     window.location.href = "index.html";
 });
+$("workspaceSettingsLogoutButton").addEventListener("click", () => {
+    localStorage.clear();
+    window.location.href = "index.html";
+});
 $("workspaceUserAvatar").addEventListener("click", (event) => {
     event.stopPropagation();
     toggleProfileMenu();
+});
+setupWorkspaceVoiceInput({
+    inputId: "workspaceTaskTitle",
+    micId: "workspaceTaskMicButton",
+    sendId: "workspaceTaskVoiceSendButton",
+    statusId: "workspaceTaskVoiceStatus",
+    formId: "workspaceTaskForm",
+    idleText: "Use mic to fill the title.",
+});
+setupWorkspaceVoiceInput({
+    inputId: "workspaceAIPrompt",
+    micId: "workspaceAIMicButton",
+    sendId: "workspaceAIVoiceSendButton",
+    statusId: "workspaceAIVoiceStatus",
+    formId: "workspaceAIForm",
+    idleText: "Use mic to fill the prompt.",
 });
 $("workspaceDateFilterButton").addEventListener("click", () => {
     const input = $("workspaceDateFilter");
@@ -1114,10 +1298,6 @@ $("workspaceSearchInput").addEventListener("blur", () => {
         $("workspaceSearchWrap").classList.add("collapsed");
     }
 });
-$("workspaceThemeInput").addEventListener("change", () => {
-    document.body.dataset.workspaceTheme = $("workspaceThemeInput").value || "ocean";
-});
-
 document.querySelectorAll("[data-workspace-view]").forEach((button) => {
     button.addEventListener("click", () => {
         state.activeView = button.dataset.workspaceView;

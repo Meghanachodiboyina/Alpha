@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import smtplib
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -101,11 +102,21 @@ def request_password_reset(
     )
     try:
         send_password_reset_email(user.email, otp_code)
-        return schemas.MessageResponse(message="OTP sent successfully to your email.")
+        return schemas.MessageResponse(message="OTP sent successfully. Enter OTP and new password.")
     except RuntimeError:
         raise HTTPException(
             status_code=500,
             detail="Password reset email is not configured on the server.",
+        )
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(
+            status_code=500,
+            detail="SMTP login failed. For Gmail, use a 16-character App Password, not your normal Gmail password.",
+        )
+    except (smtplib.SMTPException, OSError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not send OTP email: {exc}",
         )
 
 

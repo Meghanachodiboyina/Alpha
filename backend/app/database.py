@@ -1,32 +1,44 @@
 import os
 
 from dotenv import load_dotenv
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+pymysql://root:password@localhost:3306/automated_routine_creator",
-)
+def _normalize_database_url(database_url: str | None) -> str:
+    if not database_url:
+        return ""
+    normalized_url = database_url.strip()
+    if normalized_url.startswith("postgres://"):
+        return normalized_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    if normalized_url.startswith("postgresql://"):
+        return normalized_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return normalized_url
 
 SQLITE_FALLBACK_URL = os.getenv(
     "SQLITE_FALLBACK_URL",
     f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(__file__)), 'arc_local.db')}",
 )
 
+DATABASE_URL = _normalize_database_url(os.getenv("DATABASE_URL")) or SQLITE_FALLBACK_URL
+
 
 def _create_engine(database_url: str):
     engine_kwargs = {"pool_pre_ping": True}
     if database_url.startswith("sqlite"):
         engine_kwargs["connect_args"] = {"check_same_thread": False}
+    if database_url.startswith("postgresql"):
+        engine_kwargs["pool_recycle"] = 300
     return create_engine(database_url, **engine_kwargs)
 
 
 def _create_resilient_engine():
-    primary_engine = _create_engine(DATABASE_URL)
+    try:
+        primary_engine = _create_engine(DATABASE_URL)
+    except ModuleNotFoundError:
+        return _create_engine(SQLITE_FALLBACK_URL)
     try:
         with primary_engine.connect():
             return primary_engine

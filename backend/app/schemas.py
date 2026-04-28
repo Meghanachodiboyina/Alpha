@@ -330,6 +330,10 @@ class WorkspaceInviteRespond(BaseModel):
         return normalized
 
 
+class WorkspaceInviteTokenAccept(BaseModel):
+    token: str = Field(..., min_length=20)
+
+
 class WorkspaceInviteOut(BaseModel):
     id: int
     inviter_user_id: int

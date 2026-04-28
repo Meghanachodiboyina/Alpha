@@ -110,19 +110,28 @@
                             Planner Scope
                             <select id="plannerScope">
                                 <option value="today">Today's Schedule</option>
-                                <option value="daily">Daily Planner</option>
-                                <option value="weekly">Weekly Planner</option>
                             </select>
                         </label>
                         <button type="submit" class="primary-button">Generate Routine</button>
                     </form>
 
                     <div id="plannerMessage" class="form-message"></div>
-                    <div id="plannerBreakdown" class="planner-breakdown"></div>
                     <div id="aiSuggestions" class="tips-list"></div>
                 </article>
 
-                <article class="panel glass">
+                <article class="panel glass generated-ai-tasks-panel">
+                    <div class="panel-header">
+                        <div>
+                            <p class="eyebrow">AI Output</p>
+                            <h3>Generated AI Tasks</h3>
+                        </div>
+                    </div>
+                    <div id="plannerBreakdown" class="planner-breakdown">
+                        <div class="generated-placeholder">Generated tasks will appear here.</div>
+                    </div>
+                </article>
+
+                <article class="panel glass manual-routine-panel">
                     <div class="panel-header">
                         <div>
                             <p class="eyebrow">Manual Routine</p>

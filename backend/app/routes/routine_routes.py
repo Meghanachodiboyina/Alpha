@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from fastapi import Body
 from .. import crud, schemas
-from ..ai_engine import generate_ai_plan
+from ..ai_engine import generate_ai_plan, transcribe_audio_with_groq
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
@@ -67,5 +67,23 @@ async def generate_routine(
     current_user: User = Depends(get_current_user),
 ):
     ai_plan = await generate_ai_plan(payload.input_text, payload.plan_scope)
-    crud.create_many_routines(db, current_user.id, ai_plan.routines)
     return ai_plan
+
+
+@router.post("/transcribe-audio")
+async def transcribe_audio(
+    audio: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    audio_bytes = await audio.read()
+    text = await transcribe_audio_with_groq(
+        audio_bytes=audio_bytes,
+        filename=audio.filename or "voice.webm",
+        content_type=audio.content_type or "audio/webm",
+    )
+    if not text:
+        raise HTTPException(
+            status_code=503,
+            detail="Voice transcription is unavailable. Add GROQ_API_KEY or try again.",
+        )
+    return {"text": text}

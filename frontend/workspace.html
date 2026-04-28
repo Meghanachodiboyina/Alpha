@@ -74,8 +74,28 @@
         }
 
         .workspace-v2 .workspace-ai-task-row {
-            grid-template-columns: minmax(110px, 0.25fr) minmax(240px, 1fr) minmax(180px, auto);
+            grid-template-columns: 1fr;
             align-items: start;
+            width: 100%;
+            text-align: left;
+            gap: 0.25rem;
+            min-height: auto;
+        }
+
+        .workspace-v2 .workspace-ai-group-card,
+        .workspace-v2 .workspace-ai-group-tasks {
+            width: 100%;
+            min-width: 0;
+        }
+
+        .workspace-v2 .workspace-ai-group-card header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.75rem;
+        }
+
+        .workspace-v2 .workspace-member-sidebar-row {
+            grid-template-columns: minmax(0, 1fr) 10px;
         }
 
         .workspace-v2 .workspace-member-sidebar-row {
@@ -85,6 +105,25 @@
 
         .workspace-v2 .workspace-list-sections.workspace-watermark-mode::before {
             content: none;
+        }
+
+        .workspace-v2 .workspace-topbar-v2,
+        .workspace-v2 .workspace-header-actions {
+            position: relative;
+            z-index: 1000;
+            overflow: visible;
+        }
+
+        .workspace-v2 .workspace-profile-menu {
+            position: absolute;
+            top: calc(100% + 0.55rem);
+            right: 0;
+            z-index: 9999;
+        }
+
+        .workspace-v2 .workspace-content-v2 {
+            position: relative;
+            z-index: 1;
         }
 
         @media (max-width: 1180px) {
@@ -160,8 +199,8 @@
 
             <section class="workspace-members-box">
                 <div class="workspace-projects-header">
-                    <p class="eyebrow">Members <span id="workspaceMemberCountSidebar">(0)</span></p>
-                    <button type="button" id="viewAllMembersButton" class="ghost-button workspace-mini-button" data-page-target="invites">Invites</button>
+                    <button type="button" class="ghost-button workspace-mini-button workspace-members-button">Members <span id="workspaceMemberCountSidebar">(0)</span></button>
+                    <button type="button" id="viewAllMembersButton" class="ghost-button workspace-mini-button workspace-invites-button">Invites</button>
                 </div>
                 <div id="workspaceSidebarMembers" class="workspace-sidebar-members"></div>
             </section>
@@ -187,7 +226,6 @@
                             <div class="workspace-profile-copy">
                                 <strong id="workspaceProfileName">User</strong>
                                 <span id="workspaceProfileEmail">user@example.com</span>
-                                <small id="workspaceProfileRole">Owner</small>
                             </div>
                             <button type="button" id="workspaceProfileLogoutButton" class="primary-button wide">Logout</button>
                         </div>
@@ -200,8 +238,8 @@
                         <button type="button" class="workspace-view-button" data-workspace-view="timeline">Timeline</button>
                     </div>
                     <label class="workspace-search-wrap collapsed" id="workspaceSearchWrap">
-                        <button type="button" id="workspaceSearchToggle" class="workspace-search-toggle" aria-label="Search tasks">🔍</button>
-                        <input type="search" id="workspaceSearchInput" class="workspace-control workspace-search" placeholder="Search tasks...">
+                        <button type="button" id="workspaceSearchToggle" class="workspace-search-toggle" aria-label="Search tasks">Search</button>
+                        <input type="search" id="workspaceSearchInput" class="workspace-control workspace-search" placeholder="Search task...">
                     </label>
                     <select id="workspaceFilterSelect" class="workspace-control">
                         <option value="">All Status</option>
@@ -317,19 +355,23 @@
 
                         <form id="workspaceSettingsForm" class="workspace-settings-form">
                             <section class="workspace-settings-section">
-                                <h5>Workspace</h5>
+                                <h5>Profile</h5>
                                 <label>
                                     Workspace name
                                     <input type="text" id="workspaceNameInput" class="workspace-control" required>
                                 </label>
-                                <label>
-                                    Theme
-                                    <select id="workspaceThemeInput" class="workspace-control">
-                                        <option value="ocean">Ocean</option>
-                                        <option value="dark">Dark</option>
-                                        <option value="light">Light</option>
-                                    </select>
-                                </label>
+                            </section>
+
+                            <section class="workspace-settings-section">
+                                <h5>Account</h5>
+                                <div class="workspace-setting-row">
+                                    <span id="workspaceSettingsAccountName">User</span>
+                                    <strong id="workspaceSettingsAccountEmail">No email available</strong>
+                                </div>
+                            </section>
+
+                            <section class="workspace-settings-section">
+                                <h5>Notifications</h5>
                                 <label class="workspace-setting-row">
                                     <span>Push notifications</span>
                                     <input type="checkbox" id="workspaceNotificationsInput">
@@ -342,6 +384,7 @@
 
                             <div class="workspace-modal-actions">
                                 <button type="submit" class="primary-button">Save Settings</button>
+                                <button type="button" id="workspaceSettingsLogoutButton" class="secondary-button">Logout</button>
                             </div>
                         </form>
                     </section>
@@ -371,7 +414,14 @@
             <div class="workspace-form-grid">
                 <label>
                     Task title
-                    <input type="text" id="workspaceTaskTitle" required>
+                    <div class="workspace-voice-field">
+                        <input type="text" id="workspaceTaskTitle" required>
+                        <button type="button" id="workspaceTaskMicButton" class="workspace-voice-button" aria-label="Use voice for task title">Mic</button>
+                    </div>
+                    <div class="workspace-voice-actions">
+                        <button type="button" id="workspaceTaskVoiceSendButton" class="ghost-button">Send</button>
+                        <small id="workspaceTaskVoiceStatus" class="workspace-voice-status">Use mic to fill the title.</small>
+                    </div>
                 </label>
                 <label>
                     Assignee
@@ -432,7 +482,14 @@
             </div>
             <label>
                 Prompt
-                <textarea id="workspaceAIPrompt" rows="4" placeholder="Build frontend login page" required></textarea>
+                <div class="workspace-voice-field textarea-field">
+                    <textarea id="workspaceAIPrompt" rows="4" placeholder="Work on FastAPI and connect backend" required></textarea>
+                    <button type="button" id="workspaceAIMicButton" class="workspace-voice-button" aria-label="Use voice for AI prompt">Mic</button>
+                </div>
+                <div class="workspace-voice-actions">
+                    <button type="button" id="workspaceAIVoiceSendButton" class="ghost-button">Send</button>
+                    <small id="workspaceAIVoiceStatus" class="workspace-voice-status">Use mic to fill the prompt.</small>
+                </div>
             </label>
             <div class="workspace-form-grid">
                 <label>
@@ -479,6 +536,21 @@
         </form>
     </dialog>
 
+    <dialog id="workspaceInvitesListModal" class="workspace-modal">
+        <div class="workspace-modal-card">
+            <div class="workspace-modal-header">
+                <div>
+                    <p class="eyebrow">Invitations</p>
+                    <h3>Invited people</h3>
+                </div>
+                <button type="button" id="closeInvitesListModalButton" class="ghost-button">Close</button>
+            </div>
+            <div id="workspaceInviteModalList" class="workspace-invite-list"></div>
+        </div>
+    </dialog>
+
+    <script src="js/voice.js"></script>
     <script src="js/workspace.js"></script>
 </body>
 </html>
+

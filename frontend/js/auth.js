@@ -1,4 +1,18 @@
-const API_BASE_URL = "http://127.0.0.1:8000";
+const resolveApiBaseUrl = () => {
+    const saved = localStorage.getItem("arc_api_base");
+    if (saved) return saved;
+    if (window.location.protocol.startsWith("http") && window.location.hostname) {
+        return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return "http://127.0.0.1:8000";
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
+const API_FALLBACK_URLS = Array.from(new Set([
+    API_BASE_URL,
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+]));
 const authMessageTimers = new Map();
 
 const saveAuth = (data) => {
@@ -6,13 +20,13 @@ const saveAuth = (data) => {
     localStorage.setItem("arc_user", JSON.stringify(data.user));
 };
 
-const setMessage = (elementId, message, type = "success") => {
+const setMessage = (elementId, message, type = "success", { persist = false } = {}) => {
     const target = document.getElementById(elementId);
     if (!target) return;
     target.textContent = message;
     target.className = `form-message ${type === "success" ? "success-text" : "error-text"}`;
     window.clearTimeout(authMessageTimers.get(elementId));
-    if (message) {
+    if (message && !persist) {
         const timer = window.setTimeout(() => {
             target.textContent = "";
             target.className = "form-message";
@@ -21,26 +35,46 @@ const setMessage = (elementId, message, type = "success") => {
     }
 };
 
-const postJson = async (url, payload) => {
-    const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-    });
+const postJson = async (path, payload) => {
+    let lastNetworkError = null;
+    for (const baseUrl of API_FALLBACK_URLS) {
+        try {
+            const response = await fetch(`${baseUrl}${path}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(data.detail || data.message || "Something went wrong.");
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || data.message || "Something went wrong.");
+            }
+            localStorage.setItem("arc_api_base", baseUrl);
+            return data;
+        } catch (error) {
+            if (error instanceof TypeError) {
+                lastNetworkError = error;
+                continue;
+            }
+            throw error;
+        }
     }
-    return data;
+    throw new Error(`Could not connect to the backend API. Please start the backend server at ${API_BASE_URL} and try again.`);
 };
 
-const showLoginMode = (showForgot = false) => {
+const showLoginMode = (showForgot = false, { persist = true } = {}) => {
     const loginForm = document.getElementById("loginForm");
     const forgotForm = document.getElementById("forgotPasswordForm");
     if (!loginForm || !forgotForm) return;
     loginForm.hidden = showForgot;
     forgotForm.hidden = !showForgot;
+    if (persist) {
+        if (showForgot) {
+            sessionStorage.setItem("arc_auth_mode", "reset");
+        } else {
+            sessionStorage.removeItem("arc_auth_mode");
+        }
+    }
 };
 
 const registerForm = document.getElementById("registerForm");
@@ -53,7 +87,7 @@ if (registerForm) {
     registerForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         try {
-            const data = await postJson(`${API_BASE_URL}/register`, {
+            const data = await postJson("/register", {
                 name: document.getElementById("registerName").value.trim(),
                 email: document.getElementById("registerEmail").value.trim(),
                 password: document.getElementById("registerPassword").value,
@@ -76,7 +110,8 @@ if (loginForm) {
     if (!fromHome && !isRegisteredFlow) {
         window.location.replace("index.html");
     }
-    showLoginMode(false);
+    const shouldShowReset = sessionStorage.getItem("arc_auth_mode") === "reset" || searchParams.get("reset") === "1";
+    showLoginMode(shouldShowReset, { persist: false });
     if (isRegisteredFlow) {
         setMessage("loginMessage", "Registered successfully. Please login to continue.");
     }
@@ -84,10 +119,11 @@ if (loginForm) {
     loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         try {
-            const data = await postJson(`${API_BASE_URL}/login`, {
+            const data = await postJson("/login", {
                 email: document.getElementById("loginEmail").value.trim(),
                 password: document.getElementById("loginPassword").value,
             });
+            sessionStorage.removeItem("arc_auth_mode");
             saveAuth(data);
             setMessage("loginMessage", "Login successful. Redirecting...");
             window.setTimeout(() => {
@@ -101,23 +137,43 @@ if (loginForm) {
 
 const toggleForgotPassword = document.getElementById("toggleForgotPassword");
 if (toggleForgotPassword) {
-    toggleForgotPassword.addEventListener("click", () => showLoginMode(true));
+    toggleForgotPassword.addEventListener("click", () => {
+        showLoginMode(true);
+    });
 }
 
 const backToLogin = document.getElementById("backToLogin");
 if (backToLogin) {
-    backToLogin.addEventListener("click", () => showLoginMode(false));
+    backToLogin.addEventListener("click", (event) => {
+        event.preventDefault();
+        showLoginMode(false);
+    });
 }
 
 const sendOtpButton = document.getElementById("sendOtpButton");
 if (sendOtpButton) {
-    sendOtpButton.addEventListener("click", async () => {
+    sendOtpButton.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const resetEmail = document.getElementById("resetEmail");
         try {
-            const email = document.getElementById("resetEmail").value.trim();
-            const data = await postJson(`${API_BASE_URL}/forgot-password/request`, { email });
-            setMessage("resetMessage", data.message || "OTP sent successfully.");
+            const email = resetEmail.value.trim();
+            if (!email) {
+                setMessage("resetMessage", "Enter your registered email first.", "error", { persist: true });
+                return;
+            }
+            sendOtpButton.disabled = true;
+            sendOtpButton.textContent = "Sending...";
+            sessionStorage.setItem("arc_auth_mode", "reset");
+            await postJson("/forgot-password/request", { email });
+            showLoginMode(true);
+            resetEmail.value = email;
+            setMessage("resetMessage", "OTP sent successfully. Check your email.", "success", { persist: true });
+            document.getElementById("resetOtp").focus();
         } catch (error) {
-            setMessage("resetMessage", error.message, "error");
+            setMessage("resetMessage", error.message, "error", { persist: true });
+        } finally {
+            sendOtpButton.disabled = false;
+            sendOtpButton.textContent = "Send OTP";
         }
     });
 }
@@ -126,20 +182,36 @@ const forgotPasswordForm = document.getElementById("forgotPasswordForm");
 if (forgotPasswordForm) {
     forgotPasswordForm.addEventListener("submit", async (event) => {
         event.preventDefault();
+        const resetButton = forgotPasswordForm.querySelector('button[type="submit"]');
+        const resetEmail = document.getElementById("resetEmail");
+        const email = resetEmail.value.trim();
         try {
-            const data = await postJson(`${API_BASE_URL}/forgot-password/verify`, {
-                email: document.getElementById("resetEmail").value.trim(),
+            const newPassword = document.getElementById("resetNewPassword").value;
+            const confirmPassword = document.getElementById("resetConfirmPassword").value;
+            if (newPassword !== confirmPassword) {
+                setMessage("resetMessage", "New password and confirm password must match.", "error", { persist: true });
+                return;
+            }
+            if (resetButton) {
+                resetButton.disabled = true;
+                resetButton.textContent = "Resetting...";
+            }
+            const data = await postJson("/forgot-password/verify", {
+                email,
                 otp: document.getElementById("resetOtp").value.trim(),
-                new_password: document.getElementById("resetNewPassword").value,
+                new_password: newPassword,
             });
-            setMessage("resetMessage", data.message || "Password reset successful.");
-            window.setTimeout(() => {
-                showLoginMode(false);
-                forgotPasswordForm.reset();
-                setMessage("loginMessage", "Password reset successful. Please login with your new password.");
-            }, 1000);
+            showLoginMode(true);
+            resetEmail.value = email;
+            sessionStorage.setItem("arc_auth_mode", "reset");
+            setMessage("resetMessage", "Your password has been changed successfully. Login with your new password.", "success", { persist: true });
         } catch (error) {
-            setMessage("resetMessage", error.message, "error");
+            setMessage("resetMessage", error.message, "error", { persist: true });
+        } finally {
+            if (resetButton) {
+                resetButton.disabled = false;
+                resetButton.textContent = "Verify OTP & Reset";
+            }
         }
     });
 }
