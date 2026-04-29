@@ -10,16 +10,8 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="auth-body">
-    <main class="auth-layout">
-        <section class="auth-card glass invite-accept-card">
-            <span class="badge">Workspace Invite</span>
-            <h1>Accepting your invitation</h1>
-            <p id="inviteAcceptMessage" class="form-message">Please wait while we add this email to the workspace.</p>
-            <div class="form-actions invite-accept-actions" hidden>
-                <a id="inviteRegisterLink" class="primary-button" href="register.html?from=home">Register</a>
-                <a id="inviteLoginLink" class="secondary-button" href="login.html?from=home">Login</a>
-            </div>
-        </section>
+    <main class="auth-layout" hidden>
+        <p id="inviteAcceptMessage" class="form-message"></p>
     </main>
     <script src="js/accept_invite.js"></script>
 </body>

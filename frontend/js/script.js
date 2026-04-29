@@ -1,4 +1,12 @@
-const API_BASE = "http://127.0.0.1:8000";
+const resolveApiBase = () => {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+        return "http://127.0.0.1:8000";
+    }
+    return "https://routine-creator.onrender.com";
+};
+
+const API_BASE = resolveApiBase();
 const token = localStorage.getItem("arc_token");
 const user = JSON.parse(localStorage.getItem("arc_user") || "null");
 
@@ -117,7 +125,12 @@ const renderEmptyState = (container, message) => {
 };
 
 const fetchJson = async (url, options = {}) => {
-    const response = await fetch(url, options);
+    let response;
+    try {
+        response = await fetch(url, options);
+    } catch (error) {
+        throw new Error(`Could not reach the backend API at ${API_BASE}. Please check the Render service and CORS settings.`);
+    }
     const rawText = await response.text();
     let data = null;
     if (rawText) {
@@ -639,6 +652,9 @@ document.getElementById("aiPlannerForm").addEventListener("submit", async (event
     delete form.dataset.submittedByVoice;
     const tipsContainer = document.getElementById("aiSuggestions");
     const breakdownContainer = document.getElementById("plannerBreakdown");
+    const plannerInput = document.getElementById("plannerInput");
+    const plannerScope = document.getElementById("plannerScope");
+    const plannerUrl = `${API_BASE}/generate-routine`;
     tipsContainer.innerHTML = "";
     latestPlannerPreviewRoutines = [];
     sessionStorage.removeItem("arc_latest_planner_preview");
@@ -646,25 +662,35 @@ document.getElementById("aiPlannerForm").addEventListener("submit", async (event
     window.clearTimeout(plannerBreakdownTimer);
 
     try {
-        const result = await fetchJson(`${API_BASE}/generate-routine`, {
+        console.info("[Planner AI] Sending Groq-backed request", {
+            url: plannerUrl,
+            scope: plannerScope.value,
+            inputLength: plannerInput.value.trim().length,
+        });
+        const result = await fetchJson(plannerUrl, {
             method: "POST",
             headers: authHeaders(),
             body: JSON.stringify({
-                input_text: document.getElementById("plannerInput").value.trim(),
-                plan_scope: document.getElementById("plannerScope").value,
+                input_text: plannerInput.value.trim(),
+                plan_scope: plannerScope.value,
             }),
         });
 
         setMessage("plannerMessage", result.summary);
         const generatedRoutines = result.routines || [];
+        console.info("[Planner AI] Groq response received", {
+            routineCount: generatedRoutines.length,
+            titles: generatedRoutines.map((routine) => routine.title),
+        });
         renderPlannerBreakdown(generatedRoutines);
         tipsContainer.innerHTML = "";
-        document.getElementById("plannerInput").value = "";
+        plannerInput.value = "";
         if (generatedRoutines.length) {
             await saveGeneratedRoutines(generatedRoutines);
             renderPlannerBreakdown(generatedRoutines, { remember: false });
         }
     } catch (error) {
+        console.error("[Planner AI] Groq-backed request failed", error);
         setMessage("plannerMessage", error.message, "error");
     }
 });

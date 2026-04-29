@@ -8562,3 +8562,41 @@ body[data-workspace-theme="light"] .workspace-date-button.active {
         grid-row: auto !important;
     }
 }
+
+/* Workspace select menu contrast fix. Native dropdown options need explicit colors
+   because active filter controls use white text on blue backgrounds. */
+.workspace-body select,
+.workspace-body .workspace-control:is(select),
+.workspace-body .workspace-inline-select {
+    color: #0f172a !important;
+}
+
+.workspace-body select option,
+.workspace-body select optgroup,
+.workspace-v2 select option,
+.workspace-v2 select optgroup,
+.workspace-v2 .workspace-control option,
+.workspace-v2 .workspace-inline-select option {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+
+.workspace-body select option:hover,
+.workspace-body select option:focus,
+.workspace-v2 select option:hover,
+.workspace-v2 select option:focus,
+.workspace-v2 .workspace-control option:hover,
+.workspace-v2 .workspace-control option:focus,
+.workspace-v2 .workspace-inline-select option:hover,
+.workspace-v2 .workspace-inline-select option:focus {
+    background-color: #dbeafe !important;
+    color: #0f172a !important;
+}
+
+.workspace-body select option:checked,
+.workspace-v2 select option:checked,
+.workspace-v2 .workspace-control option:checked,
+.workspace-v2 .workspace-inline-select option:checked {
+    background-color: #2563eb !important;
+    color: #ffffff !important;
+}

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from fastapi import Body
 from .. import crud, schemas
-from ..ai_engine import generate_ai_plan, transcribe_audio_with_groq
+from ..ai_engine import AIServiceUnavailableError, generate_ai_plan, transcribe_audio_with_groq
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
@@ -66,7 +66,10 @@ async def generate_routine(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ai_plan = await generate_ai_plan(payload.input_text, payload.plan_scope)
+    try:
+        ai_plan = await generate_ai_plan(payload.input_text, payload.plan_scope)
+    except AIServiceUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     return ai_plan
 
 

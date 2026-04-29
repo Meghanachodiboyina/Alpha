@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
-from ..ai_engine import generate_workspace_ai_tasks
+from ..ai_engine import AIServiceUnavailableError, generate_workspace_ai_tasks
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
@@ -159,11 +159,14 @@ def ai_generate_workspace_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    generated_tasks = generate_workspace_ai_tasks(
-        prompt=payload.prompt,
-        project_name=payload.project_name,
-        assignee=payload.assignee or current_user.name,
-    )
+    try:
+        generated_tasks = generate_workspace_ai_tasks(
+            prompt=payload.prompt,
+            project_name=payload.project_name,
+            assignee=payload.assignee or current_user.name,
+        )
+    except AIServiceUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     created_tasks = crud.create_many_workspace_tasks(
         db,
         current_user.id,

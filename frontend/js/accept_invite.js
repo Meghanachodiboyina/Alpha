@@ -1,18 +1,19 @@
 const resolveInviteApiBase = () => {
-    const saved = localStorage.getItem("arc_api_base");
-    if (saved) return saved;
-    if (window.location.protocol.startsWith("http") && window.location.hostname) {
-        return `${window.location.protocol}//${window.location.hostname}:8000`;
-    }
-    return "http://127.0.0.1:8000";
+    return "https://routine-creator.onrender.com";
 };
 
 const inviteMessage = document.getElementById("inviteAcceptMessage");
-const inviteActions = document.querySelector(".invite-accept-actions");
-const registerLink = document.getElementById("inviteRegisterLink");
-const loginLink = document.getElementById("inviteLoginLink");
+const redirectToLogin = (params = {}) => {
+    const url = new URL("login.html", window.location.href);
+    url.searchParams.set("from", "invite");
+    Object.entries(params).forEach(([key, value]) => {
+        if (value) url.searchParams.set(key, value);
+    });
+    window.location.replace(url.toString());
+};
 
 const setInviteMessage = (message, type = "success") => {
+    if (!inviteMessage) return;
     inviteMessage.textContent = message;
     inviteMessage.className = `form-message ${type === "error" ? "error-text" : "success-text"}`;
 };
@@ -20,7 +21,7 @@ const setInviteMessage = (message, type = "success") => {
 const acceptInvite = async () => {
     const token = new URLSearchParams(window.location.search).get("token");
     if (!token) {
-        setInviteMessage("This invitation link is missing or invalid.", "error");
+        redirectToLogin({ invite: "missing" });
         return;
     }
 
@@ -35,12 +36,10 @@ const acceptInvite = async () => {
             throw new Error(data.detail || data.message || "Could not accept this invitation.");
         }
         setInviteMessage(data.message || "Invitation accepted. Please login or register to continue.");
-        inviteActions.hidden = false;
-        registerLink.href = "register.html?from=home&invite=accepted";
-        loginLink.href = "login.html?from=home&invite=accepted";
+        redirectToLogin({ invite: "accepted" });
     } catch (error) {
         setInviteMessage(error.message, "error");
-        inviteActions.hidden = false;
+        redirectToLogin({ invite: "error", message: error.message });
     }
 };
 

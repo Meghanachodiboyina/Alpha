@@ -5,6 +5,7 @@ import ssl
 from html import escape
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from pathlib import Path
 
 import bcrypt
 from dotenv import load_dotenv
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .database import get_db
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
 SECRET_KEY = os.getenv("SECRET_KEY") or "development-secret-key"
 ALGORITHM = os.getenv("ALGORITHM") or "HS256"

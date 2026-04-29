@@ -345,24 +345,33 @@ def respond_workspace_invite(db: Session, invite: models.WorkspaceInvite, action
 
 
 def get_workspace_members(db: Session, current_user: models.User):
+    scope_user_ids = _get_workspace_scope_user_ids(db, current_user)
+    users_by_id = {
+        user.id: user
+        for user in db.query(models.User).filter(models.User.id.in_(scope_user_ids)).all()
+    }
+    users_by_email = {user.email.lower(): user for user in users_by_id.values()}
     accepted_invites = (
-        db.query(models.WorkspaceInvite, models.User)
-        .outerjoin(models.User, models.User.email == models.WorkspaceInvite.invitee_email)
+        db.query(models.WorkspaceInvite)
         .filter(
             models.WorkspaceInvite.status == "Accepted",
             (
-                (models.WorkspaceInvite.inviter_user_id == current_user.id)
-                | (models.WorkspaceInvite.invitee_email == current_user.email)
+                models.WorkspaceInvite.inviter_user_id.in_(scope_user_ids)
+                | models.WorkspaceInvite.invitee_email.in_([user.email for user in users_by_id.values()])
             ),
         )
         .all()
     )
 
-    members = {(current_user.email, current_user.name): ("Owner", True)}
-    for invite, invited_user in accepted_invites:
-        inviter = db.query(models.User).filter(models.User.id == invite.inviter_user_id).first()
+    members = {}
+    for user in users_by_id.values():
+        members[(user.email, user.name)] = ("Owner" if user.id == current_user.id else "Member", user.id == current_user.id)
+
+    for invite in accepted_invites:
+        inviter = users_by_id.get(invite.inviter_user_id)
         if inviter:
             members[(inviter.email, inviter.name)] = ("Owner" if inviter.id == current_user.id else "Admin", inviter.id == current_user.id)
+        invited_user = users_by_email.get(invite.invitee_email.lower())
         if invited_user:
             members[(invited_user.email, invited_user.name)] = (invite.role, invited_user.id == current_user.id)
         else:
@@ -519,19 +528,22 @@ def create_workspace_project(
 
 
 def get_workspace_project_by_id(db: Session, current_user: models.User, project_id: int):
+    scope_user_ids = _get_workspace_scope_user_ids(db, current_user)
     return (
         db.query(models.WorkspaceProject)
         .filter(
             models.WorkspaceProject.id == project_id,
-            models.WorkspaceProject.user_id == current_user.id,
+            models.WorkspaceProject.user_id.in_(scope_user_ids),
         )
         .first()
     )
 
 
 def delete_workspace_project(db: Session, project: models.WorkspaceProject):
+    project_owner = db.query(models.User).filter(models.User.id == project.user_id).first()
+    scope_user_ids = _get_workspace_scope_user_ids(db, project_owner) if project_owner else [project.user_id]
     tasks = db.query(models.WorkspaceTask).filter(
-        models.WorkspaceTask.user_id == project.user_id,
+        models.WorkspaceTask.user_id.in_(scope_user_ids),
         models.WorkspaceTask.project_name == project.name,
     ).all()
     for task in tasks:
@@ -541,24 +553,29 @@ def delete_workspace_project(db: Session, project: models.WorkspaceProject):
 
 
 def _get_workspace_scope_user_ids(db: Session, current_user: models.User) -> list[int]:
-    accepted_invites = (
-        db.query(models.WorkspaceInvite)
-        .filter(
-            models.WorkspaceInvite.status == "Accepted",
-            (
-                (models.WorkspaceInvite.inviter_user_id == current_user.id)
-                | (models.WorkspaceInvite.invitee_email == current_user.email)
-            ),
-        )
-        .all()
-    )
+    accepted_invites = db.query(models.WorkspaceInvite).filter(models.WorkspaceInvite.status == "Accepted").all()
+    email_lookup = {
+        user.email.lower(): user.id
+        for user in db.query(models.User).all()
+    }
+    adjacency: dict[int, set[int]] = {}
 
-    user_ids = {current_user.id}
     for invite in accepted_invites:
-        user_ids.add(invite.inviter_user_id)
-        invited_user = get_user_by_email(db, invite.invitee_email)
-        if invited_user:
-            user_ids.add(invited_user.id)
+        invited_user_id = email_lookup.get(invite.invitee_email.lower())
+        if not invited_user_id:
+            continue
+        adjacency.setdefault(invite.inviter_user_id, set()).add(invited_user_id)
+        adjacency.setdefault(invited_user_id, set()).add(invite.inviter_user_id)
+
+    user_ids = set()
+    pending = [current_user.id]
+    while pending:
+        user_id = pending.pop()
+        if user_id in user_ids:
+            continue
+        user_ids.add(user_id)
+        pending.extend(adjacency.get(user_id, set()) - user_ids)
+
     return sorted(user_ids)
 
 

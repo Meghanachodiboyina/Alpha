@@ -1,10 +1,9 @@
 const resolveApiBase = () => {
-    const saved = localStorage.getItem("arc_api_base");
-    if (saved) return saved;
-    if (window.location.protocol.startsWith("http") && window.location.hostname) {
-        return `${window.location.protocol}//${window.location.hostname}:8000`;
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+        return "http://127.0.0.1:8000";
     }
-    return "http://127.0.0.1:8000";
+    return "https://routine-creator.onrender.com";
 };
 
 const API_BASE = resolveApiBase();
@@ -54,7 +53,7 @@ const fetchJson = async (url, options = {}) => {
     try {
         response = await fetch(url, options);
     } catch (error) {
-        throw new Error(`Failed to fetch workspace data. Make sure the backend is running at ${API_BASE}.`);
+        throw new Error(`Could not reach the backend API at ${API_BASE}. Please check the deployed Render service.`);
     }
 
     const data = response.status === 204 ? null : await response.json().catch(() => ({}));
@@ -151,13 +150,16 @@ const getProjectCollections = () => {
     const projects = state.projects.length
         ? state.projects
         : [{ name: "Team Space", color: "#22c1c3" }, { name: "Project 1" }, { name: "Project 2" }];
+    const serverSpaces = projects.filter((project) => project.description === "__team_space__");
+    const serverSpaceNames = new Set(serverSpaces.map((project) => project.name));
     const storedSpaces = state.spaces
         .filter(Boolean)
+        .filter((name) => !serverSpaceNames.has(name))
         .map((name) => {
             const savedProject = projects.find((project) => project.name === name);
             return { id: savedProject?.id || 0, name, color: savedProject?.color || "#1779c6" };
         });
-    const teamSpaces = [{ name: "Team Space", color: "#22c1c3" }, ...storedSpaces];
+    const teamSpaces = [{ name: "Team Space", color: "#22c1c3" }, ...serverSpaces, ...storedSpaces];
     const spaceNames = new Set(teamSpaces.map((space) => space.name));
     const otherProjects = projects.filter((project) => !spaceNames.has(project.name));
     return { teamSpaces, otherProjects };
@@ -1033,18 +1035,27 @@ const createProject = async () => {
     }
 };
 
-const createTeamSpace = () => {
+const createTeamSpace = async () => {
     const name = window.prompt("Enter the new team space name");
     if (!name || !name.trim()) return;
     const normalized = name.trim();
-    if (!state.spaces.includes(normalized) && normalized !== "Team Space") {
-        state.spaces.push(normalized);
-        persistSpaces();
+    try {
+        const project = await fetchJson(`${API_BASE}/workspace/projects`, {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({
+                name: normalized,
+                description: "__team_space__",
+                color: "#1779c6",
+            }),
+        });
+        state.activeProject = project.name;
+        setActivePage("home");
+        setMessage("Team space created.");
+        await loadWorkspace();
+    } catch (error) {
+        setMessage(error.message, "error");
     }
-    state.activeProject = normalized;
-    setActivePage("home");
-    renderAll();
-    setMessage("Team space created.");
 };
 
 const deleteWorkspaceProject = async (button) => {
