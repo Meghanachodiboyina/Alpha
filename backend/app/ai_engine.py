@@ -20,14 +20,34 @@ GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_WHISPER_MODEL = "whisper-large-v3"
 logger = logging.getLogger(__name__)
+_last_groq_error = ""
 
 
 class AIServiceUnavailableError(RuntimeError):
     pass
 
 
+def _set_last_groq_error(message: str) -> None:
+    global _last_groq_error
+    _last_groq_error = message
+
+
+def _get_last_groq_error() -> str:
+    return _last_groq_error
+
+
+def _extract_groq_error(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+        message = data.get("error", {}).get("message") or data.get("detail") or response.text
+    except Exception:
+        message = response.text
+    message = re.sub(r"gsk_[A-Za-z0-9]+", "[redacted]", str(message))
+    return f"Groq returned {response.status_code}: {message[:300]}"
+
+
 def _groq_headers() -> dict[str, str] | None:
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
     if not api_key:
         return None
     return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -37,9 +57,39 @@ def _groq_model() -> str:
     return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
+async def check_groq_connection() -> dict:
+    _set_last_groq_error("")
+    configured = bool(_groq_headers())
+    if not configured:
+        return {
+            "configured": False,
+            "ok": False,
+            "model": _groq_model(),
+            "error": _get_last_groq_error() or "GROQ_API_KEY is not configured in the backend environment.",
+        }
+
+    parsed = await _groq_chat_json_async(
+        messages=[
+            {
+                "role": "system",
+                "content": "Return JSON only in this exact shape: {\"ok\":true}",
+            },
+            {"role": "user", "content": "health check"},
+        ],
+        temperature=0,
+    )
+    return {
+        "configured": configured,
+        "ok": bool(parsed),
+        "model": _groq_model(),
+        "error": "" if parsed else (_get_last_groq_error() or "Groq returned no usable response."),
+    }
+
+
 async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: float = 0.35) -> dict | None:
     headers = _groq_headers()
     if not headers:
+        _set_last_groq_error("GROQ_API_KEY is not configured in the backend environment.")
         logger.warning("Groq chat skipped: GROQ_API_KEY is not configured.")
         return None
 
@@ -63,6 +113,8 @@ async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: flo
         )
         return parsed
     except httpx.HTTPStatusError as exc:
+        safe_error = _extract_groq_error(exc.response)
+        _set_last_groq_error(safe_error)
         logger.warning(
             "Groq chat request failed with status=%s body=%s",
             exc.response.status_code,
@@ -70,6 +122,8 @@ async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: flo
         )
         return None
     except Exception as exc:
+        safe_error = f"Groq request failed: {exc}"
+        _set_last_groq_error(safe_error)
         logger.warning("Groq chat request failed: %s", exc)
         return None
 
@@ -77,6 +131,7 @@ async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: flo
 def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -> dict | None:
     headers = _groq_headers()
     if not headers:
+        _set_last_groq_error("GROQ_API_KEY is not configured in the backend environment.")
         logger.warning("Groq chat skipped: GROQ_API_KEY is not configured.")
         return None
 
@@ -100,6 +155,8 @@ def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -
         )
         return parsed
     except httpx.HTTPStatusError as exc:
+        safe_error = _extract_groq_error(exc.response)
+        _set_last_groq_error(safe_error)
         logger.warning(
             "Groq chat request failed with status=%s body=%s",
             exc.response.status_code,
@@ -107,6 +164,8 @@ def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -
         )
         return None
     except Exception as exc:
+        safe_error = f"Groq request failed: {exc}"
+        _set_last_groq_error(safe_error)
         logger.warning("Groq chat request failed: %s", exc)
         return None
 
@@ -116,7 +175,7 @@ async def transcribe_audio_with_groq(
     filename: str = "voice.webm",
     content_type: str = "audio/webm",
 ) -> str:
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
     if not api_key or not audio_bytes:
         return ""
 
@@ -707,7 +766,8 @@ async def generate_ai_plan(input_text: str, plan_scope: str) -> AIGenerationResp
         temperature=0.45,
     )
     if not parsed:
-        raise AIServiceUnavailableError("Planner AI could not reach Groq. Check GROQ_API_KEY, network access, and the Groq service response.")
+        detail = _get_last_groq_error() or "Check GROQ_API_KEY, network access, and the Groq service response."
+        raise AIServiceUnavailableError(f"Planner AI could not reach Groq. {detail}")
 
     groq_tasks = _normalize_groq_task_items(parsed.get("tasks") or [], max_tasks=8)
     if not groq_tasks:
@@ -984,4 +1044,5 @@ def generate_workspace_ai_tasks(
         logger.warning("Groq workspace response did not contain usable tasks: keys=%s", list(groq_result.keys()))
         raise AIServiceUnavailableError("Workspace AI received an empty Groq response. Please try again with a clearer task prompt.")
 
-    raise AIServiceUnavailableError("Workspace AI could not reach Groq. Check GROQ_API_KEY, network access, and the Groq service response.")
+    detail = _get_last_groq_error() or "Check GROQ_API_KEY, network access, and the Groq service response."
+    raise AIServiceUnavailableError(f"Workspace AI could not reach Groq. {detail}")

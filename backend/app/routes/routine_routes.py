@@ -2,12 +2,17 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from fastapi import Body
 from .. import crud, schemas
-from ..ai_engine import AIServiceUnavailableError, generate_ai_plan, transcribe_audio_with_groq
+from ..ai_engine import AIServiceUnavailableError, check_groq_connection, generate_ai_plan, transcribe_audio_with_groq
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
 
 router = APIRouter(tags=["Routines"])
+
+
+@router.get("/ai/groq-status")
+async def groq_status(current_user: User = Depends(get_current_user)):
+    return await check_groq_connection()
 
 
 @router.get("/routines", response_model=list[schemas.RoutineOut])

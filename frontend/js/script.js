@@ -1,4 +1,6 @@
 const resolveApiBase = () => {
+    const configured = window.ARC_API_BASE || localStorage.getItem("arc_api_base");
+    if (configured) return configured.replace(/\/$/, "");
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1") {
         return "http://127.0.0.1:8000";
