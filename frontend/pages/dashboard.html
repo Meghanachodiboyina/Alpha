@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | Routine Creator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="../js/theme.js"></script>
+    <link rel="stylesheet" href="../css/global.css">
+    <link rel="stylesheet" href="../css/layout.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+</head>
+<body class="dashboard-body rc-system" data-rc-page="overview">
+    <main class="app-main page-stack">
+        <section class="dashboard-hero">
+            <div class="dashboard-hero-copy">
+                <h1>Plan the day, track the week,<br>and keep routines <span class="text-accent">moving</span>.</h1>
+                <p>Manage AI-generated plans and manual routines from one focused dashboard.</p>
+            </div>
+            <div class="dashboard-hero-illustration" aria-hidden="true">
+                <div class="hero-illus-calendar">
+                    <i data-lucide="calendar-days"></i>
+                </div>
+                <div class="hero-illus-clock">
+                    <i data-lucide="clock"></i>
+                </div>
+            </div>
+            <nav class="dashboard-tabs" aria-label="Dashboard views">
+                <a href="#overview" data-view-link="overview">Overview</a>
+                <a href="#planner" data-view-link="planner">Planner</a>
+                <a href="#routines" data-view-link="routines">Routines</a>
+                <a href="#weekly" data-view-link="weekly">Weekly</a>
+            </nav>
+        </section>
+
+        <section class="view-panel" data-view="overview" id="overview">
+            <div class="dashboard-stats-grid">
+                <article class="card dashboard-stat clickable-stat" data-filter-target="all">
+                    <div class="dashboard-stat-top">
+                        <span>Total Routines</span>
+                        <div class="stat-icon"><i data-lucide="layers-3"></i></div>
+                    </div>
+                    <strong id="totalRoutines">0</strong>
+                    <small>All saved routines</small>
+                </article>
+                <article class="card dashboard-stat clickable-stat" data-filter-target="completed">
+                    <div class="dashboard-stat-top">
+                        <span>Completed</span>
+                        <div class="stat-icon"><i data-lucide="check-check"></i></div>
+                    </div>
+                    <strong id="completedRoutines">0</strong>
+                    <small>Finished tasks</small>
+                </article>
+                <article class="card dashboard-stat clickable-stat" data-filter-target="pending">
+                    <div class="dashboard-stat-top">
+                        <span>Pending</span>
+                        <div class="stat-icon"><i data-lucide="clock-4"></i></div>
+                    </div>
+                    <strong id="pendingRoutines">0</strong>
+                    <small>Waiting for action</small>
+                </article>
+                <article class="card dashboard-stat clickable-stat" data-filter-target="today">
+                    <div class="dashboard-stat-top">
+                        <span>Today</span>
+                        <div class="stat-icon"><i data-lucide="calendar-days"></i></div>
+                    </div>
+                    <strong id="todayRoutines">0</strong>
+                    <small>Due today</small>
+                </article>
+                <article class="card dashboard-stat">
+                    <div class="dashboard-stat-top">
+                        <span>Productivity</span>
+                        <div class="stat-icon"><i data-lucide="trending-up"></i></div>
+                    </div>
+                    <strong><span id="productivityScore">0</span>%</strong>
+                    <small>Completion score</small>
+                    <div id="productivityProgressRing" class="stat-ring" aria-hidden="true"></div>
+                </article>
+            </div>
+
+            <div class="page-grid">
+                <article class="card span-7">
+                    <div class="section-header">
+                        <div>
+                            <h3>Today at a glance</h3>
+                            <p>Current day routine flow</p>
+                        </div>
+                        <a href="#planner" data-view-link="planner" class="accent-button" style="min-height:36px;padding:0 14px;font-size:13px;flex-shrink:0;">
+                            <i data-lucide="plus"></i> Add Task
+                        </a>
+                    </div>
+                    <div id="overviewTodayList" class="rc-task-list"></div>
+                </article>
+
+                <article class="card span-5">
+                    <div class="section-header">
+                        <div>
+                            <h3>Weekly progress</h3>
+                            <p>Completion across this week</p>
+                        </div>
+                    </div>
+                    <div class="weekly-chart-wrap">
+                        <canvas id="weeklyProgressChart"></canvas>
+                        <div id="weeklyChart" class="rc-chart-fallback" hidden></div>
+                    </div>
+                    <div id="weeklyOverviewSummary" class="rc-summary-grid"></div>
+                </article>
+
+                <details class="secondary-section span-12">
+                    <summary>More insights</summary>
+                    <div class="insight-grid">
+                        <article class="card">
+                            <div class="section-header">
+                                <div>
+                                    <h3>Recent activity</h3>
+                                    <p>Latest routine changes</p>
+                                </div>
+                            </div>
+                            <div id="recentActivityList" class="rc-activity-list"></div>
+                        </article>
+
+                        <article class="card">
+                            <div class="section-header">
+                                <div>
+                                    <h3>Routines by category</h3>
+                                    <p>Progress grouped by work type</p>
+                                </div>
+                            </div>
+                            <div id="routineCategoryList" class="rc-category-grid"></div>
+                        </article>
+                    </div>
+                </details>
+            </div>
+        </section>
+
+        <section class="view-panel" data-view="planner" id="planner" hidden>
+            <div class="page-grid">
+                <article class="card span-6">
+                    <div class="section-header">
+                        <div>
+                            <h3>AI planner</h3>
+                            <p>Generate a practical routine breakdown</p>
+                        </div>
+                    </div>
+                    <form id="aiPlannerForm" class="planner-shell">
+                        <label>
+                            Prompt
+                            <textarea id="plannerInput" rows="5" placeholder="Plan my study, project work, gym, and evening review" required></textarea>
+                        </label>
+                        <label>
+                            Plan scope
+                            <select id="plannerScope">
+                                <option value="daily">Daily plan</option>
+                                <option value="weekly">Weekly plan</option>
+                            </select>
+                        </label>
+                        <div class="form-actions">
+                            <button type="submit" class="primary-button"><i data-lucide="sparkles"></i> Generate</button>
+                            <button type="button" id="voiceButton" class="secondary-button"><i data-lucide="mic"></i> Voice</button>
+                            <button type="button" id="voiceSendButton" class="ghost-button">Send</button>
+                        </div>
+                        <p id="voiceStatus" class="form-message"></p>
+                        <p id="plannerMessage" class="form-message"></p>
+                    </form>
+                    <div id="aiSuggestions" class="routine-list"></div>
+                </article>
+
+                <article class="card span-6">
+                    <div class="section-header">
+                        <div>
+                            <h3>Manual routine</h3>
+                            <p>Create or edit a saved routine</p>
+                        </div>
+                    </div>
+                    <form id="routineForm" class="dashboard-form-grid">
+                        <input type="hidden" id="routineId">
+                        <label>
+                            Title
+                            <input type="text" id="title" placeholder="Deep work block" required>
+                        </label>
+                        <label>
+                            Date
+                            <input type="date" id="date" required>
+                        </label>
+                        <label>
+                            Start time
+                            <input type="time" id="startTime">
+                        </label>
+                        <label>
+                            End time
+                            <input type="time" id="endTime">
+                        </label>
+                        <label>
+                            Priority
+                            <select id="priority">
+                                <option value="Low">Low</option>
+                                <option value="Medium">Medium</option>
+                                <option value="High">High</option>
+                            </select>
+                        </label>
+                        <label>
+                            Status
+                            <select id="status">
+                                <option value="Pending">Pending</option>
+                                <option value="Completed">Completed</option>
+                            </select>
+                        </label>
+                        <label>
+                            Estimated minutes
+                            <input type="number" id="estimatedTime" min="5" step="5" value="60">
+                        </label>
+                        <label class="form-span">
+                            Description
+                            <textarea id="description" rows="3" placeholder="What needs to happen?"></textarea>
+                        </label>
+                        <label class="form-span">
+                            Suggestion
+                            <textarea id="suggestion" rows="3" placeholder="Optional planning note"></textarea>
+                        </label>
+                        <div class="form-actions form-span">
+                            <button type="submit" class="primary-button"><i data-lucide="save"></i> Save Routine</button>
+                            <button type="button" id="resetRoutineForm" class="ghost-button">Reset</button>
+                        </div>
+                        <p id="routineMessage" class="form-message form-span"></p>
+                    </form>
+                </article>
+
+                <article class="card span-12">
+                    <div class="section-header">
+                        <div>
+                            <h3>Generated breakdown</h3>
+                            <p>AI output saved into your routine list</p>
+                        </div>
+                    </div>
+                    <div id="plannerBreakdown" class="generated-breakdown"></div>
+                </article>
+            </div>
+        </section>
+
+        <section class="view-panel" data-view="routines" id="routines" hidden>
+            <article class="card">
+                <div class="section-header">
+                    <div>
+                        <h3 id="routineSectionHeading">All saved routines</h3>
+                        <p id="routineSectionNote">Use filters to explore your routine library.</p>
+                    </div>
+                </div>
+                <details class="filter-disclosure">
+                    <summary>Filters</summary>
+                    <div class="filter-bar">
+                        <label>
+                            Status
+                            <select id="routineStatusFilter">
+                                <option value="all">All status</option>
+                                <option value="pending">Pending</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                        </label>
+                        <label>
+                            Preset
+                            <select id="routineDatePreset">
+                                <option value="all">All dates</option>
+                                <option value="today">Today</option>
+                                <option value="tomorrow">Tomorrow</option>
+                                <option value="week">This week</option>
+                            </select>
+                        </label>
+                        <label>
+                            Exact date
+                            <input type="date" id="routineDateFilter">
+                        </label>
+                        <button type="button" id="clearRoutineFilters" class="ghost-button">Clear</button>
+                    </div>
+                </details>
+                <div id="routineList" class="routine-list"></div>
+            </article>
+        </section>
+
+        <section class="view-panel" data-view="weekly" id="weekly" hidden>
+            <article class="card">
+                <div class="section-header">
+                    <div>
+                        <h3>Weekly routine list</h3>
+                        <p>Upcoming routines grouped into the current planning window</p>
+                    </div>
+                </div>
+                <details class="filter-disclosure">
+                    <summary>Filters</summary>
+                    <div class="filter-bar">
+                        <label>
+                            Preset
+                            <select id="weeklyDatePreset">
+                                <option value="week">This week</option>
+                                <option value="today">Today</option>
+                                <option value="tomorrow">Tomorrow</option>
+                                <option value="all">All dates</option>
+                            </select>
+                        </label>
+                        <label>
+                            Exact date
+                            <input type="date" id="weeklyDateFilter">
+                        </label>
+                        <button type="button" id="clearWeeklyFilters" class="ghost-button">Clear</button>
+                    </div>
+                </details>
+                <div id="weeklyRoutineList" class="routine-list"></div>
+            </article>
+        </section>
+    </main>
+
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="../js/main.js"></script>
+    <script src="../js/voice.js"></script>
+    <script src="../js/script.js"></script>
+</body>
+</html>

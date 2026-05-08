@@ -1,154 +1,29 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Workspace | Automated Routine Creator</title>
+    <title>Workspace | Routine Creator</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
-    <style>
-        .workspace-v2 .workspace-filter-row {
-            grid-template-columns: auto minmax(220px, 1.35fr) repeat(5, minmax(118px, 0.85fr));
-            align-items: center;
-        }
-
-        .workspace-v2 .workspace-filter-row .workspace-view-switch {
-            justify-content: flex-start;
-            min-width: max-content;
-        }
-
-        .workspace-v2 .workspace-search-wrap {
-            position: relative;
-        }
-
-        .workspace-v2 .workspace-search-wrap::before {
-            content: "\1F50D";
-            position: absolute;
-            left: 0.82rem;
-            top: 50%;
-            transform: translateY(-50%);
-            z-index: 1;
-            pointer-events: none;
-        }
-
-        .workspace-v2 .workspace-search-toggle {
-            display: none;
-        }
-
-        .workspace-v2 .workspace-search-wrap.collapsed .workspace-search,
-        .workspace-v2 .workspace-search {
-            margin-left: 0;
-            padding-left: 2.45rem;
-            width: 100%;
-            opacity: 1;
-            border-width: 1px;
-        }
-
-        .workspace-v2 .workspace-task-cell strong,
-        .workspace-v2 .workspace-task-cell small,
-        .workspace-v2 .workspace-table td,
-        .workspace-v2 .workspace-table th,
-        .workspace-v2 .workspace-list-card-header strong,
-        .workspace-v2 .workspace-ai-task-row strong,
-        .workspace-v2 .workspace-ai-task-row small,
-        .workspace-v2 .workspace-ai-task-row span,
-        .workspace-v2 .workspace-ai-group-card header strong,
-        .workspace-v2 .workspace-calendar-task strong,
-        .workspace-v2 .workspace-calendar-task small,
-        .workspace-v2 .workspace-timeline-meta strong,
-        .workspace-v2 .workspace-timeline-meta span,
-        .workspace-v2 .workspace-member-sidebar-copy small,
-        .workspace-v2 .workspace-member-sidebar-name {
-            overflow: visible;
-            text-overflow: clip;
-            white-space: normal;
-            overflow-wrap: anywhere;
-            line-height: 1.35;
-        }
-
-        .workspace-v2 .workspace-table-v2 {
-            table-layout: auto;
-            min-width: 840px;
-        }
-
-        .workspace-v2 .workspace-ai-task-row {
-            grid-template-columns: 1fr;
-            align-items: start;
-            width: 100%;
-            text-align: left;
-            gap: 0.25rem;
-            min-height: auto;
-        }
-
-        .workspace-v2 .workspace-ai-group-card,
-        .workspace-v2 .workspace-ai-group-tasks {
-            width: 100%;
-            min-width: 0;
-        }
-
-        .workspace-v2 .workspace-ai-group-card header {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 0.75rem;
-        }
-
-        .workspace-v2 .workspace-member-sidebar-row {
-            grid-template-columns: minmax(0, 1fr) 10px;
-        }
-
-        .workspace-v2 .workspace-member-sidebar-row {
-            grid-template-columns: 28px minmax(0, 1fr) 10px;
-            padding: 0.58rem 0.62rem;
-        }
-
-        .workspace-v2 .workspace-list-sections.workspace-watermark-mode::before {
-            content: none;
-        }
-
-        .workspace-v2 .workspace-topbar-v2,
-        .workspace-v2 .workspace-header-actions {
-            position: relative;
-            z-index: 1000;
-            overflow: visible;
-        }
-
-        .workspace-v2 .workspace-profile-menu {
-            position: absolute;
-            top: calc(100% + 0.55rem);
-            right: 0;
-            z-index: 9999;
-        }
-
-        .workspace-v2 .workspace-content-v2 {
-            position: relative;
-            z-index: 1;
-        }
-
-        @media (max-width: 1180px) {
-            .workspace-v2 .workspace-filter-row {
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-            }
-
-            .workspace-v2 .workspace-filter-row .workspace-view-switch {
-                grid-column: 1 / -1;
-            }
-        }
-
-        @media (max-width: 760px) {
-            .workspace-v2 .workspace-filter-row {
-                grid-template-columns: 1fr;
-            }
-
-            .workspace-v2 .workspace-filter-row .workspace-view-switch,
-            .workspace-v2 .workspace-ai-task-row {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="../js/theme.js"></script>
+    <script>
+        window.tailwind = {
+            config: {
+                darkMode: "class",
+                corePlugins: { preflight: false },
+            },
+        };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="../css/global.css">
+    <link rel="stylesheet" href="../css/layout.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/workspace-modern.css">
+    <link rel="stylesheet" href="../css/responsive.css">
 </head>
-<body class="workspace-body workspace-compact workspace-v2">
+<body class="workspace-body workspace-compact workspace-v2 rc-system" data-rc-page="workspace">
     <div id="workspaceLoading" class="workspace-loading" hidden>
         <div class="workspace-loading-card glass">
             <div class="workspace-spinner"></div>
@@ -156,10 +31,9 @@
         </div>
     </div>
 
-    <div class="workspace-shell workspace-shell-v2">
-        <aside class="workspace-sidebar workspace-sidebar-v2 glass">
+    <div class="workspace-shell workspace-shell-v2 app-main">
+        <aside class="workspace-sidebar workspace-sidebar-v2">
             <div class="workspace-sidebar-top">
-                <a href="dashboard.html#overview" class="workspace-back-link">&larr; Back</a>
                 <div class="brand sidebar-brand workspace-brand-compact">
                     <span class="brand-mark">ARC</span>
                     <div>
@@ -169,15 +43,15 @@
                 </div>
             </div>
 
-            <nav class="workspace-utility-nav">
+            <nav class="workspace-utility-nav compact-tools" aria-label="Workspace tools">
                 <button type="button" class="workspace-tool-button" data-page-target="calendar">
-                    <span class="workspace-tool-label"><span class="workspace-tool-icon">📅</span><span>Calendar</span></span>
+                    <span class="workspace-tool-label"><i data-lucide="calendar-days"></i><span>Calendar</span></span>
                 </button>
                 <button type="button" class="workspace-tool-button" data-page-target="aiTasks">
-                    <span class="workspace-tool-label"><span class="workspace-tool-icon">🤖</span><span>AI Tasks</span></span>
+                    <span class="workspace-tool-label"><i data-lucide="bot"></i><span>AI Tasks</span></span>
                 </button>
                 <button type="button" class="workspace-tool-button" data-page-target="reports">
-                    <span class="workspace-tool-label"><span class="workspace-tool-icon">📊</span><span>Reports</span></span>
+                    <span class="workspace-tool-label"><i data-lucide="chart-no-axes-combined"></i><span>Reports</span></span>
                 </button>
             </nav>
 
@@ -197,7 +71,7 @@
                 <div id="workspaceProjectList" class="workspace-project-list"></div>
             </section>
 
-            <section class="workspace-members-box">
+            <section class="workspace-members-box workspace-secondary-group">
                 <div class="workspace-projects-header">
                     <button type="button" class="ghost-button workspace-mini-button workspace-members-button">Members <span id="workspaceMemberCountSidebar">(0)</span></button>
                     <button type="button" id="viewAllMembersButton" class="ghost-button workspace-mini-button workspace-invites-button">Invites</button>
@@ -207,40 +81,64 @@
 
             <div class="workspace-sidebar-bottom">
                 <button type="button" class="workspace-tool-button workspace-settings-button" data-page-target="settings">
-                    <span class="workspace-tool-label"><span class="workspace-tool-icon">⚙️</span><span>Settings</span></span>
+                    <span class="workspace-tool-label"><i data-lucide="settings"></i><span>Settings</span></span>
                 </button>
-                <button type="button" id="workspaceLogoutButton" class="secondary-button wide">Logout</button>
+                <button type="button" id="workspaceLogoutButton" class="ghost-button wide">Logout</button>
             </div>
         </aside>
 
         <main class="workspace-main workspace-main-v2">
-            <header id="workspaceTopbar" class="workspace-topbar workspace-topbar-v2 glass">
-                <div class="workspace-header-actions">
-                    <button type="button" id="openInviteModalButton" class="secondary-button workspace-topbar-button">Invite People</button>
-                    <button type="button" id="openAIModalButton" class="primary-button workspace-topbar-button workspace-ai-add-button">Add AI Tasks</button>
-                    <button type="button" id="openTaskModalButton" class="primary-button workspace-topbar-button">Add Task</button>
-                    <button type="button" id="workspaceUserAvatar" class="workspace-avatar workspace-avatar-button" aria-expanded="false" aria-controls="workspaceProfileMenu">U</button>
-                    <div id="workspaceProfileMenu" class="workspace-profile-menu" hidden>
-                        <div class="workspace-profile-card">
-                            <div class="workspace-profile-avatar" id="workspaceProfileAvatar">U</div>
-                            <div class="workspace-profile-copy">
-                                <strong id="workspaceProfileName">User</strong>
-                                <span id="workspaceProfileEmail">user@example.com</span>
-                            </div>
-                            <button type="button" id="workspaceProfileLogoutButton" class="primary-button wide">Logout</button>
+            <header id="workspaceTopbar" class="workspace-topbar workspace-topbar-v2">
+                <div class="workspace-header-actions workspace-primary-toolbar">
+                    <label class="workspace-search-wrap" id="workspaceSearchWrap">
+                        <button type="button" id="workspaceSearchToggle" class="workspace-search-toggle sr-only" aria-label="Search tasks">Search</button>
+                        <i data-lucide="search"></i>
+                        <input type="search" id="workspaceSearchInput" class="workspace-control workspace-search" placeholder="Search tasks">
+                    </label>
+                    <button type="button" id="openInviteModalButton" class="ghost-button workspace-topbar-button">
+                        <i data-lucide="user-plus"></i>
+                        Invite
+                    </button>
+                </div>
+                <button type="button" id="workspaceUserAvatar" class="workspace-avatar workspace-avatar-button sr-only" aria-expanded="false" aria-controls="workspaceProfileMenu">U</button>
+                <div id="workspaceProfileMenu" class="workspace-profile-menu" hidden>
+                    <div class="workspace-profile-card">
+                        <div class="workspace-profile-avatar" id="workspaceProfileAvatar">U</div>
+                        <div class="workspace-profile-copy">
+                            <strong id="workspaceProfileName">User</strong>
+                            <span id="workspaceProfileEmail">user@example.com</span>
+                        </div>
+                        <button type="button" id="workspaceProfileLogoutButton" class="primary-button wide">Logout</button>
+                    </div>
+                </div>
+            </header>
+
+            <section class="workspace-content workspace-content-v2">
+                <div class="workspace-content-header workspace-content-header-v2 workspace-heading-only">
+                    <div>
+                        <p class="eyebrow">Tasks</p>
+                        <h2 id="workspaceProjectHeading">Team Space</h2>
+                    </div>
+                    <div class="workspace-view-command-bar">
+                        <div class="workspace-view-switch" aria-label="Workspace view">
+                            <button type="button" class="workspace-view-button active" data-view="list" data-workspace-view="table">List</button>
+                            <button type="button" class="workspace-view-button" data-view="board" data-workspace-view="board">Board</button>
+                            <button type="button" class="workspace-view-button" data-view="timeline" data-workspace-view="timeline">Timeline</button>
+                        </div>
+                        <div class="workspace-view-actions">
+                            <button type="button" id="workspaceFilterToggle" class="secondary-button workspace-topbar-button" aria-expanded="false" aria-controls="workspaceFilterPanel">
+                                <i data-lucide="sliders-horizontal"></i>
+                                Filter
+                            </button>
+                            <button type="button" id="openTaskModalButton" class="primary-button workspace-topbar-button">
+                                <i data-lucide="plus"></i>
+                                Add Task
+                            </button>
                         </div>
                     </div>
                 </div>
-                <div class="workspace-filter-row">
-                    <div class="workspace-view-switch">
-                        <button type="button" class="workspace-view-button active" data-workspace-view="table">List</button>
-                        <button type="button" class="workspace-view-button" data-workspace-view="board">Board</button>
-                        <button type="button" class="workspace-view-button" data-workspace-view="timeline">Timeline</button>
-                    </div>
-                    <label class="workspace-search-wrap collapsed" id="workspaceSearchWrap">
-                        <button type="button" id="workspaceSearchToggle" class="workspace-search-toggle" aria-label="Search tasks">Search</button>
-                        <input type="search" id="workspaceSearchInput" class="workspace-control workspace-search" placeholder="Search task...">
-                    </label>
+
+                <div id="workspaceFilterPanel" class="workspace-filter-panel" hidden>
                     <select id="workspaceFilterSelect" class="workspace-control">
                         <option value="">All Status</option>
                         <option value="Todo">Todo</option>
@@ -252,6 +150,7 @@
                         <option value="priority:desc">Priority</option>
                         <option value="assignee:asc">Assignee</option>
                         <option value="title:asc">Task Name</option>
+                        <option value="status:asc">Status</option>
                     </select>
                     <select id="workspaceAssigneeSelect" class="workspace-control">
                         <option value="">All Assignees</option>
@@ -267,48 +166,43 @@
                     <div class="workspace-date-filter">
                         <button type="button" id="workspaceDateFilterButton" class="workspace-control workspace-date-button">
                             <span id="workspaceDateFilterLabel">All Dates</span>
-                            <span class="workspace-date-icon">📅</span>
+                            <span class="workspace-date-icon"><i data-lucide="calendar-days"></i></span>
                         </button>
                         <input type="date" id="workspaceDateFilter" class="workspace-date-input" aria-label="Select due date">
                     </div>
                 </div>
-            </header>
-
-            <section class="workspace-content workspace-content-v2 glass">
-                <div class="workspace-content-header workspace-content-header-v2 workspace-heading-only">
-                    <h3 id="workspaceProjectHeading">Team Space</h3>
-                </div>
 
                 <div id="workspaceMessage" class="form-message"></div>
+                <section id="workspaceSummaryStrip" class="workspace-summary-strip" aria-label="Workspace summary"></section>
 
                 <section id="workspaceHomePage" class="workspace-page">
-                    <section id="workspaceTableView" class="workspace-view-panel">
+                    <div id="list-view" class="view-container workspace-view-panel">
                         <div id="workspaceListSections" class="workspace-list-sections"></div>
-                    </section>
-
-                    <section id="workspaceBoardView" class="workspace-view-panel" hidden>
-                    <div class="workspace-board">
-                        <article class="workspace-kanban-column">
-                            <header><h4>Todo</h4><span id="workspaceTodoCount">0</span></header>
-                            <div class="workspace-kanban-dropzone" data-workspace-status="Todo"></div>
-                        </article>
-                        <article class="workspace-kanban-column">
-                            <header><h4>In Progress</h4><span id="workspaceProgressCount">0</span></header>
-                            <div class="workspace-kanban-dropzone" data-workspace-status="In Progress"></div>
-                        </article>
-                        <article class="workspace-kanban-column">
-                            <header><h4>Completed</h4><span id="workspaceDoneCount">0</span></header>
-                            <div class="workspace-kanban-dropzone" data-workspace-status="Completed"></div>
-                        </article>
                     </div>
-                </section>
-                    <section id="workspaceTimelineView" class="workspace-view-panel" hidden>
+
+                    <div id="board-view" class="view-container workspace-view-panel" hidden>
+                        <div class="workspace-board">
+                            <article class="workspace-kanban-column">
+                                <header><h4>Todo</h4><span id="workspaceTodoCount">0</span></header>
+                                <div class="workspace-kanban-dropzone" data-workspace-status="Todo"></div>
+                            </article>
+                            <article class="workspace-kanban-column">
+                                <header><h4>In Progress</h4><span id="workspaceProgressCount">0</span></header>
+                                <div class="workspace-kanban-dropzone" data-workspace-status="In Progress"></div>
+                            </article>
+                            <article class="workspace-kanban-column">
+                                <header><h4>Completed</h4><span id="workspaceDoneCount">0</span></header>
+                                <div class="workspace-kanban-dropzone" data-workspace-status="Completed"></div>
+                            </article>
+                        </div>
+                    </div>
+                    <div id="timeline-view" class="view-container workspace-view-panel" hidden>
                         <div id="workspaceTimeline" class="workspace-timeline"></div>
-                    </section>
+                    </div>
                 </section>
 
                 <section class="workspace-inline-panels">
-                    <section id="workspaceCalendarPage" class="workspace-page workspace-tool-panel glass" hidden>
+                    <section id="workspaceCalendarPage" class="workspace-page workspace-tool-panel" hidden>
                         <div class="workspace-tool-header">
                             <h4>Calendar</h4>
                             <span id="workspaceCalendarCount">0 items</span>
@@ -330,15 +224,21 @@
                         <div id="workspaceCalendarGrid" class="workspace-month-grid"></div>
                     </section>
 
-                    <section id="workspaceAITasksPage" class="workspace-page workspace-tool-panel glass" hidden>
+                    <section id="workspaceAITasksPage" class="workspace-page workspace-tool-panel" hidden>
                         <div class="workspace-tool-header">
-                            <h4>AI Generated Tasks</h4>
-                            <span id="workspaceAITaskSummary">Recent AI output</span>
+                            <div>
+                                <h4>AI Generated Tasks</h4>
+                                <span id="workspaceAITaskSummary">Recent AI output</span>
+                            </div>
+                            <button type="button" id="openAIModalButton" class="secondary-button">
+                                <i data-lucide="sparkles"></i>
+                                Generate
+                            </button>
                         </div>
                         <div id="workspaceAITasks" class="workspace-report-grid"></div>
                     </section>
 
-                    <section id="workspaceReportsPage" class="workspace-page workspace-tool-panel glass" hidden>
+                    <section id="workspaceReportsPage" class="workspace-page workspace-tool-panel" hidden>
                         <div class="workspace-tool-header">
                             <h4>Reports</h4>
                             <span id="workspaceReportSummary">Live team stats</span>
@@ -347,7 +247,7 @@
                         <div id="workspaceMemberPerformance" class="workspace-report-list workspace-report-list-wide"></div>
                     </section>
 
-                    <section id="workspaceSettingsPage" class="workspace-page workspace-tool-panel glass" hidden>
+                    <section id="workspaceSettingsPage" class="workspace-page workspace-tool-panel" hidden>
                         <div class="workspace-tool-header">
                             <h4>Settings</h4>
                             <span id="workspaceSettingsStatus">Workspace preferences</span>
@@ -389,7 +289,7 @@
                         </form>
                     </section>
 
-                    <section id="workspaceInvitesPage" class="workspace-page workspace-tool-panel glass" hidden>
+                    <section id="workspaceInvitesPage" class="workspace-page workspace-tool-panel" hidden>
                         <div class="workspace-tool-header">
                             <h4>Invitations</h4>
                             <span id="workspacePendingInviteCount">0 pending</span>
@@ -549,8 +449,10 @@
         </div>
     </dialog>
 
-    <script src="js/voice.js"></script>
-    <script src="js/workspace.js"></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="../js/main.js"></script>
+    <script src="../js/voice.js"></script>
+    <script src="../js/workspace.js"></script>
 </body>
 </html>
 

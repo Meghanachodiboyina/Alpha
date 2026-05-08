@@ -1,4 +1,4 @@
-const resolveApiBase = () => {
+﻿const resolveApiBase = () => {
     const configured = window.ARC_API_BASE || localStorage.getItem("arc_api_base");
     if (configured) return configured.replace(/\/$/, "");
     const host = window.location.hostname;
@@ -11,9 +11,21 @@ const resolveApiBase = () => {
 const API_BASE = resolveApiBase();
 const token = localStorage.getItem("arc_token");
 const user = JSON.parse(localStorage.getItem("arc_user") || "null");
+const frontendPath = (relativePath) => {
+    const pathName = window.location.pathname.replace(/\\/g, "/");
+    const rootPrefix = pathName.includes("/pages/") || pathName.includes("/auth/") ? "../" : "";
+    return `${rootPrefix}${relativePath}`;
+};
+const clearSessionStorage = () => {
+    const theme = localStorage.getItem("arc_theme");
+    const apiBase = localStorage.getItem("arc_api_base");
+    localStorage.clear();
+    if (theme) localStorage.setItem("arc_theme", theme);
+    if (apiBase) localStorage.setItem("arc_api_base", apiBase);
+};
 
 if (!token) {
-    window.location.href = "index.html";
+    window.location.href = frontendPath("index.html");
 }
 
 const authHeaders = () => ({
@@ -55,6 +67,7 @@ const dashboardState = {
     routines: [],
     weeklyRoutines: [],
     activeStatFilter: "all",
+    searchQuery: "",
     stats: {
         total_routines: 0,
         completed_routines: 0,
@@ -67,8 +80,10 @@ const dashboardState = {
 const messageTimers = new Map();
 let plannerBreakdownTimer = null;
 let latestPlannerPreviewRoutines = JSON.parse(sessionStorage.getItem("arc_latest_planner_preview") || "[]");
+let weeklyProgressChart = null;
 
 const currentUserName = document.getElementById("currentUserName");
+const currentUserAvatar = document.getElementById("currentUserAvatar");
 const pageEyebrow = document.getElementById("pageEyebrow");
 const pageTitle = document.getElementById("pageTitle");
 const pageViews = Array.from(document.querySelectorAll("[data-view]"));
@@ -76,6 +91,10 @@ const viewLinks = Array.from(document.querySelectorAll("[data-view-link]"));
 
 if (currentUserName && user) {
     currentUserName.textContent = user.name;
+}
+
+if (currentUserAvatar && user?.name) {
+    currentUserAvatar.textContent = user.name.trim().charAt(0).toUpperCase();
 }
 
 document.getElementById("date").value = todayDate;
@@ -120,6 +139,193 @@ const formatTime = (timeValue) => {
     const date = new Date();
     date.setHours(Number(hours), Number(minutes));
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+};
+
+const escapeHTML = (value = "") =>
+    String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+const refreshIcons = () => {
+    if (window.lucide?.createIcons) {
+        window.lucide.createIcons();
+    }
+};
+
+const normalizeRoutineText = (routine) =>
+    `${routine.title || ""} ${routine.description || ""} ${routine.suggestion || ""}`.toLowerCase();
+
+const matchesDashboardSearch = (routine) => {
+    const query = dashboardState.searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return `${normalizeRoutineText(routine)} ${getRoutineCategory(routine).toLowerCase()} ${routine.priority || ""} ${routine.status || ""}`
+        .toLowerCase()
+        .includes(query);
+};
+
+const getRoutineCategory = (routine) => {
+    const text = normalizeRoutineText(routine);
+    if (/(gym|workout|health|walk|run|meditat|sleep|meal|cook|water|fitness)/.test(text)) return "Health";
+    if (/(study|learn|course|read|python|practice|lesson|research|book)/.test(text)) return "Learning";
+    if (/(meeting|client|project|work|email|report|launch|design|code|review)/.test(text)) return "Work";
+    if (/(home|family|clean|errand|shop|personal|bill|call)/.test(text)) return "Personal";
+    return "Focus";
+};
+
+const getRoutineCategoryIcon = (category) => ({
+    Work: "briefcase-business",
+    Health: "heart-pulse",
+    Learning: "book-open-check",
+    Personal: "home",
+    Focus: "sparkles",
+}[category] || "sparkles");
+
+const formatTaskTimeRange = (routine) => {
+    if (!routine.start_time && !routine.end_time) return "Flexible";
+    if (routine.start_time && routine.end_time) return `${formatTime(routine.start_time)} - ${formatTime(routine.end_time)}`;
+    return routine.start_time ? formatTime(routine.start_time) : formatTime(routine.end_time);
+};
+
+const getMinutesFromTime = (timeValue) => {
+    if (!timeValue) return null;
+    const [hours, minutes] = timeValue.split(":").map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+    return hours * 60 + minutes;
+};
+
+const getVisualRoutineStatus = (routine) => {
+    if (routine.status === "Completed") return "Completed";
+    if (routine.date !== todayDate) return "Pending";
+
+    const startMinutes = getMinutesFromTime(routine.start_time);
+    if (startMinutes === null) return "Pending";
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const estimatedEnd = startMinutes + Number(routine.estimated_time || 60);
+    const endMinutes = getMinutesFromTime(routine.end_time) ?? estimatedEnd;
+
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes ? "In Progress" : "Pending";
+};
+
+const getWeekDates = () => {
+    const monday = new Date();
+    const dayOffset = (monday.getDay() + 6) % 7;
+    monday.setDate(monday.getDate() - dayOffset);
+
+    return Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(monday);
+        date.setDate(monday.getDate() + index);
+        return getLocalDateString(date);
+    });
+};
+
+const formatDateLabel = (dateString, options) => {
+    const [year, month, day] = dateString.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString([], options);
+};
+
+const formatRelativeTime = (dateValue) => {
+    if (!dateValue) return "Recently";
+    const date = new Date(dateValue);
+    if (Number.isNaN(date.getTime())) return "Recently";
+
+    const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+    const ranges = [
+        ["year", 31536000],
+        ["month", 2592000],
+        ["week", 604800],
+        ["day", 86400],
+        ["hour", 3600],
+        ["minute", 60],
+    ];
+    const formatter = new Intl.RelativeTimeFormat([], { numeric: "auto" });
+    for (const [unit, seconds] of ranges) {
+        if (Math.abs(diffSeconds) >= seconds) {
+            return formatter.format(Math.round(diffSeconds / seconds), unit);
+        }
+    }
+    return "Just now";
+};
+
+const renderWeeklyProgressChart = (weekStats) => {
+    const canvas = document.getElementById("weeklyProgressChart");
+    const fallbackChart = document.getElementById("weeklyChart");
+    if (!canvas || !fallbackChart) return;
+
+    fallbackChart.innerHTML = "";
+
+    if (window.Chart) {
+        fallbackChart.hidden = true;
+        const context = canvas.getContext("2d");
+        if (weeklyProgressChart) {
+            weeklyProgressChart.destroy();
+        }
+        weeklyProgressChart = new Chart(context, {
+            type: "bar",
+            data: {
+                labels: weekStats.map((day) => formatDateLabel(day.date, { weekday: "short" })),
+                datasets: [{
+                    label: "Progress",
+                    data: weekStats.map((day) => day.progress),
+                    borderRadius: 12,
+                    borderSkipped: false,
+                    backgroundColor: (contextInfo) => {
+                        const chart = contextInfo.chart;
+                        const { ctx, chartArea } = chart;
+                        if (!chartArea) return "#6366f1";
+                        const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+                        gradient.addColorStop(0, "#6366f1");
+                        gradient.addColorStop(1, "#22c55e");
+                        return gradient;
+                    },
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (item) => `${item.raw}% complete`,
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: "#94a3b8", font: { weight: 700 } },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { color: "rgba(255,255,255,0.08)" },
+                        ticks: {
+                            color: "#94a3b8",
+                            callback: (value) => `${value}%`,
+                        },
+                    },
+                },
+            },
+        });
+        return;
+    }
+
+    fallbackChart.hidden = false;
+    weekStats.forEach((day) => {
+        const bar = document.createElement("div");
+        bar.className = "rc-chart-day";
+        bar.style.setProperty("--bar-height", `${Math.max(day.progress, day.total ? 14 : 4)}%`);
+        bar.innerHTML = `
+            <div class="rc-chart-bar" title="${day.progress}% complete"></div>
+            <span>${formatDateLabel(day.date, { weekday: "short" })}</span>
+        `;
+        fallbackChart.appendChild(bar);
+    });
 };
 
 const renderEmptyState = (container, message) => {
@@ -208,6 +414,7 @@ const applyRoutineFilters = (routines) => {
     const statFilter = dashboardState.activeStatFilter;
 
     return routines.filter((routine) => {
+        const searchMatch = matchesDashboardSearch(routine);
         const statusMatch = statusFilter === "all" || routine.status.toLowerCase() === statusFilter;
         const presetMatch = matchesDatePreset(routine.date, datePreset);
         const exactMatch = !exactDate || routine.date === exactDate;
@@ -216,14 +423,14 @@ const applyRoutineFilters = (routines) => {
             (statFilter === "pending" && routine.status === "Pending") ||
             (statFilter === "completed" && routine.status === "Completed") ||
             (statFilter === "today" && routine.date === todayDate);
-        return statusMatch && presetMatch && exactMatch && statMatch;
+        return searchMatch && statusMatch && presetMatch && exactMatch && statMatch;
     });
 };
 
 const applyWeeklyFilters = (routines) => {
     const datePreset = document.getElementById("weeklyDatePreset")?.value || "week";
     const exactDate = document.getElementById("weeklyDateFilter")?.value || "";
-    return routines.filter((routine) => matchesDatePreset(routine.date, datePreset) && (!exactDate || routine.date === exactDate));
+    return routines.filter((routine) => matchesDashboardSearch(routine) && matchesDatePreset(routine.date, datePreset) && (!exactDate || routine.date === exactDate));
 };
 
 const resetRoutineForm = () => {
@@ -356,7 +563,7 @@ const createRoutineCard = (routine) => {
         <div>${routine.suggestion || "No suggestion available."}</div>
         <div class="routine-actions">
             <button type="button" class="ghost-button edit-routine">Edit</button>
-            ${routine.status === "Completed" ? '<div class="completed-badge"><span>✓</span><span>Completed Task</span></div>' : '<button type="button" class="secondary-button toggle-status">Mark Complete</button>'}
+            ${routine.status === "Completed" ? '<div class="completed-badge"><span>Done</span><span>Completed Task</span></div>' : '<button type="button" class="secondary-button toggle-status">Mark Complete</button>'}
             <button type="button" class="ghost-button delete-routine">Delete</button>
         </div>
     `;
@@ -442,43 +649,154 @@ const renderRoutines = (routines, weeklyRoutines) => {
 
 const renderOverview = () => {
     const overviewTodayList = document.getElementById("overviewTodayList");
+    const weeklyChart = document.getElementById("weeklyChart");
     const weeklyOverviewSummary = document.getElementById("weeklyOverviewSummary");
-    const todayRoutines = dashboardState.routines.filter((routine) => routine.date === todayDate);
+    const recentActivityList = document.getElementById("recentActivityList");
+    const routineCategoryList = document.getElementById("routineCategoryList");
+    const visibleRoutines = dedupeRoutines(dashboardState.routines).filter(matchesDashboardSearch);
+    const todayRoutines = visibleRoutines
+        .filter((routine) => routine.date === todayDate)
+        .sort((first, second) => (first.start_time || "23:59").localeCompare(second.start_time || "23:59"));
 
     overviewTodayList.innerHTML = "";
+    weeklyChart.innerHTML = "";
     weeklyOverviewSummary.innerHTML = "";
+    recentActivityList.innerHTML = "";
+    routineCategoryList.innerHTML = "";
 
     if (!todayRoutines.length) {
         renderEmptyState(overviewTodayList, "No routines lined up for today yet.");
     } else {
-        todayRoutines.forEach((routine) => {
-            const item = document.createElement("div");
-            item.className = "overview-note";
+        todayRoutines.slice(0, 6).forEach((routine) => {
+            const status = getVisualRoutineStatus(routine);
+            const item = document.createElement("article");
+            item.className = "rc-task-row";
             item.innerHTML = `
-                <h4>${routine.title}</h4>
-                <div class="routine-meta">
-                    <span class="tag ${routine.priority.toLowerCase()}">${routine.priority}</span>
-                    <span class="tag time-badge">${formatTime(routine.start_time)} - ${formatTime(routine.end_time)}</span>
+                <label class="rc-checkbox-wrap" aria-label="Toggle ${escapeHTML(routine.title)}">
+                    <input type="checkbox" class="rc-task-checkbox" data-routine-id="${routine.id ?? ""}" ${routine.status === "Completed" ? "checked" : ""} ${routine.id ? "" : "disabled"}>
+                    <span></span>
+                </label>
+                <div class="rc-task-copy">
+                    <strong>${escapeHTML(routine.title)}</strong>
+                    <small>${escapeHTML(getRoutineCategory(routine))}</small>
                 </div>
-                <div>${routine.suggestion || "Stay consistent and give this task a clean focus block."}</div>
+                <time>${escapeHTML(formatTaskTimeRange(routine))}</time>
+                <span class="rc-status ${status.toLowerCase().replace(/\s+/g, "-")}">${status}</span>
             `;
             overviewTodayList.appendChild(item);
         });
-    }
 
-    if (!dashboardState.stats.weekly_overview?.length) {
-        renderEmptyState(weeklyOverviewSummary, "Your weekly overview will appear here as soon as routines are planned.");
-    } else {
-        dashboardState.stats.weekly_overview.forEach((day) => {
-            const item = document.createElement("div");
-            item.className = "overview-note";
-            item.innerHTML = `
-                <h4>${day.date}</h4>
-                <div>${day.count} task${day.count === 1 ? "" : "s"} planned</div>
-            `;
-            weeklyOverviewSummary.appendChild(item);
+        overviewTodayList.querySelectorAll(".rc-task-checkbox").forEach((checkbox) => {
+            checkbox.addEventListener("change", async (event) => {
+                const routineId = event.currentTarget.dataset.routineId;
+                if (!routineId) return;
+
+                try {
+                    const updatedRoutine = await fetchJson(`${API_BASE}/routines/${routineId}`, {
+                        method: "PUT",
+                        headers: authHeaders(),
+                        body: JSON.stringify({
+                            status: event.currentTarget.checked ? "Completed" : "Pending",
+                        }),
+                    });
+                    upsertRoutineInState(updatedRoutine);
+                    renderDashboardState();
+                } catch (error) {
+                    event.currentTarget.checked = !event.currentTarget.checked;
+                    setMessage("routineMessage", error.message, "error");
+                }
+            });
         });
     }
+
+    const weekDates = getWeekDates();
+    const weekStats = weekDates.map((date) => {
+        const dayRoutines = visibleRoutines.filter((routine) => routine.date === date);
+        const completed = dayRoutines.filter((routine) => routine.status === "Completed").length;
+        const progress = dayRoutines.length ? Math.round((completed / dayRoutines.length) * 100) : 0;
+        return {
+            date,
+            total: dayRoutines.length,
+            completed,
+            pending: dayRoutines.length - completed,
+            progress,
+        };
+    });
+
+    renderWeeklyProgressChart(weekStats);
+
+    const weeklyCompleted = weekStats.reduce((sum, day) => sum + day.completed, 0);
+    const weeklyPending = weekStats.reduce((sum, day) => sum + day.pending, 0);
+    const activeDays = weekStats.filter((day) => day.total > 0);
+    const averageProgress = activeDays.length
+        ? Math.round(activeDays.reduce((sum, day) => sum + day.progress, 0) / activeDays.length)
+        : 0;
+
+    [
+        ["Completed", weeklyCompleted],
+        ["Pending", weeklyPending],
+        ["Avg progress", `${averageProgress}%`],
+    ].forEach(([label, value]) => {
+        const item = document.createElement("div");
+        item.className = "rc-summary-item";
+        item.innerHTML = `<strong>${value}</strong><span>${label}</span>`;
+        weeklyOverviewSummary.appendChild(item);
+    });
+
+    const activityRoutines = [...visibleRoutines]
+        .sort((first, second) => new Date(second.created_at || 0) - new Date(first.created_at || 0))
+        .slice(0, 5);
+
+    if (!activityRoutines.length) {
+        renderEmptyState(recentActivityList, "Activity will appear when routines are created or completed.");
+    } else {
+        activityRoutines.forEach((routine) => {
+            const status = getVisualRoutineStatus(routine);
+            const item = document.createElement("article");
+            item.className = "rc-activity-item";
+            item.innerHTML = `
+                <span class="rc-activity-icon"><i data-lucide="${status === "Completed" ? "check" : "activity"}"></i></span>
+                <div>
+                    <strong>${escapeHTML(routine.title)}</strong>
+                    <small>${status} - ${escapeHTML(formatRelativeTime(routine.created_at))}</small>
+                </div>
+            `;
+            recentActivityList.appendChild(item);
+        });
+    }
+
+    const categoryMap = new Map();
+    visibleRoutines.forEach((routine) => {
+        const category = getRoutineCategory(routine);
+        const current = categoryMap.get(category) || { total: 0, completed: 0 };
+        current.total += 1;
+        current.completed += routine.status === "Completed" ? 1 : 0;
+        categoryMap.set(category, current);
+    });
+
+    const preferredOrder = ["Work", "Health", "Learning", "Personal", "Focus"];
+    const categories = preferredOrder.map((name) => [name, categoryMap.get(name) || { total: 0, completed: 0 }]);
+
+    categories.forEach(([category, counts]) => {
+        const progress = counts.total ? Math.round((counts.completed / counts.total) * 100) : 0;
+        const card = document.createElement("article");
+        card.className = "rc-category-card";
+        card.style.setProperty("--category-progress", `${progress}%`);
+        card.innerHTML = `
+            <div class="rc-category-head">
+                <span><i data-lucide="${getRoutineCategoryIcon(category)}"></i></span>
+                <strong>${category}</strong>
+            </div>
+            <div class="rc-category-meta">
+                <span>${counts.completed}/${counts.total} done</span>
+                <b>${progress}%</b>
+            </div>
+            <div class="rc-progress-track"><span></span></div>
+        `;
+        routineCategoryList.appendChild(card);
+    });
+
+    refreshIcons();
 };
 
 const renderPlannerBreakdown = (routines = [], { remember = true } = {}) => {
@@ -561,6 +879,7 @@ const renderStats = (stats) => {
     document.getElementById("pendingRoutines").textContent = stats.pending_routines;
     document.getElementById("todayRoutines").textContent = stats.today_routines;
     document.getElementById("productivityScore").textContent = stats.productivity_score;
+    document.getElementById("productivityProgressRing")?.style.setProperty("--score", `${stats.productivity_score}%`);
 };
 
 const renderDashboardState = () => {
@@ -597,8 +916,8 @@ const loadDashboard = async ({ keepPlannerPreview = true, preserveScroll = false
         }
     } catch (error) {
         if (error.message.toLowerCase().includes("credentials")) {
-            localStorage.clear();
-            window.location.href = "index.html";
+            clearSessionStorage();
+            window.location.href = frontendPath("index.html");
             return;
         }
         setMessage("routineMessage", error.message, "error");
@@ -697,9 +1016,9 @@ document.getElementById("aiPlannerForm").addEventListener("submit", async (event
     }
 });
 
-document.getElementById("logoutButton").addEventListener("click", () => {
-    localStorage.clear();
-    window.location.href = "index.html";
+document.getElementById("logoutButton")?.addEventListener("click", () => {
+    clearSessionStorage();
+    window.location.href = frontendPath("index.html");
 });
 
 document.querySelectorAll(".clickable-stat").forEach((card) => {
@@ -721,6 +1040,11 @@ document.querySelectorAll(".clickable-stat").forEach((card) => {
     if (element) {
         element.addEventListener("change", renderDashboardState);
     }
+});
+
+document.getElementById("dashboardSearchInput")?.addEventListener("input", (event) => {
+    dashboardState.searchQuery = event.currentTarget.value;
+    renderDashboardState();
 });
 
 document.getElementById("clearRoutineFilters").addEventListener("click", () => {
@@ -756,6 +1080,7 @@ window.addEventListener("hashchange", syncViewFromHash);
 window.initializeVoiceInput("voiceButton", "plannerInput", "voiceSendButton", "voiceStatus");
 resetRoutineForm();
 syncViewFromHash();
+refreshIcons();
 if (latestPlannerPreviewRoutines.length) {
     renderPlannerBreakdown(latestPlannerPreviewRoutines, { remember: false });
 }

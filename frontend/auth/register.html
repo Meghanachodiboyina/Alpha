@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Get Started | Routine Creator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="../js/theme.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: "class" };
+    </script>
+    <style type="text/tailwindcss">
+        @layer base {
+            :root { color-scheme: light; }
+            .dark { color-scheme: dark; }
+            html, body {
+                min-height: 100%;
+                font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+            body { margin: 0; }
+            button, input { font: inherit; }
+        }
+        @layer utilities {
+            .onboard-bg {
+                background:
+                    radial-gradient(circle at 14% 16%, rgba(168, 85, 247, 0.22), transparent 30rem),
+                    radial-gradient(circle at 86% 8%, rgba(59, 130, 246, 0.20), transparent 32rem),
+                    radial-gradient(circle at 50% 98%, rgba(20, 184, 166, 0.16), transparent 26rem),
+                    linear-gradient(140deg, #fdfcff 0%, #eef5ff 50%, #f4faff 100%);
+            }
+            .dark .onboard-bg {
+                background:
+                    radial-gradient(circle at 14% 16%, rgba(168, 85, 247, 0.18), transparent 30rem),
+                    radial-gradient(circle at 86% 8%, rgba(59, 130, 246, 0.16), transparent 32rem),
+                    radial-gradient(circle at 50% 98%, rgba(20, 184, 166, 0.12), transparent 26rem),
+                    linear-gradient(140deg, #090a14 0%, #0f1424 52%, #07090f 100%);
+            }
+            .spin {
+                animation: rc-spin 0.75s linear infinite;
+            }
+            @keyframes rc-spin {
+                to { transform: rotate(360deg); }
+            }
+            .fade-up {
+                animation: rc-fade-up 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+            }
+            @keyframes rc-fade-up {
+                from { opacity: 0; transform: translateY(18px) scale(0.985); }
+                to   { opacity: 1; transform: translateY(0)     scale(1); }
+            }
+            .slide-in-right {
+                animation: rc-slide-in-right 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+            }
+            @keyframes rc-slide-in-right {
+                from { opacity: 0; transform: translateX(26px) scale(0.98); }
+                to   { opacity: 1; transform: translateX(0)     scale(1); }
+            }
+            .slide-in-left {
+                animation: rc-slide-in-left 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+            }
+            @keyframes rc-slide-in-left {
+                from { opacity: 0; transform: translateX(-26px) scale(0.98); }
+                to   { opacity: 1; transform: translateX(0)     scale(1); }
+            }
+            .slide-out-left {
+                animation: rc-slide-out-left 0.18s ease-in both;
+            }
+            @keyframes rc-slide-out-left {
+                to { opacity: 0; transform: translateX(-26px) scale(0.98); }
+            }
+            .slide-out-right {
+                animation: rc-slide-out-right 0.18s ease-in both;
+            }
+            @keyframes rc-slide-out-right {
+                to { opacity: 0; transform: translateX(26px) scale(0.98); }
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <noscript>
+        <main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Inter,system-ui,sans-serif;text-align:center;">
+            <p>JavaScript is required to create an account.</p>
+        </main>
+    </noscript>
+
+    <script type="module">
+        import React, { useCallback, useEffect, useMemo, useRef, useState } from "https://esm.sh/react@18.2.0";
+        import { createRoot } from "https://esm.sh/react-dom@18.2.0/client";
+        import { html } from "https://esm.sh/htm@3.1.1/react?deps=react@18.2.0";
+        import { AnimatePresence, motion, useReducedMotion } from "https://esm.sh/framer-motion@10.18.0?deps=react@18.2.0,react-dom@18.2.0";
+        import {
+            ArrowLeft,
+            ArrowRight,
+            Eye,
+            EyeOff,
+            HelpCircle,
+            Loader2,
+            LockKeyhole,
+            Mail,
+            Sparkles,
+            User,
+        } from "https://esm.sh/lucide-react@0.468.0?deps=react@18.2.0";
+
+        // ── Utilities ─────────────────────────────────────────────────────────
+        const cn = (...cls) => cls.filter(Boolean).join(" ");
+
+        const resolveApiBase = () => {
+            const saved = localStorage.getItem("arc_api_base");
+            return saved || "https://routine-creator.onrender.com";
+        };
+
+        const frontendPath = (rel) => {
+            const p = window.location.pathname.replace(/\\/g, "/");
+            const pre = p.includes("/auth/") || p.includes("/pages/") ? "../" : "";
+            return `${pre}${rel}`;
+        };
+
+        const API_BASE = resolveApiBase();
+        const API_FALLBACKS = [...new Set([API_BASE, "https://routine-creator.onrender.com"])];
+
+        const postJson = async (path, payload) => {
+            let lastErr = null;
+            for (const base of API_FALLBACKS) {
+                try {
+                    const res = await fetch(`${base}${path}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.detail || data.message || "Something went wrong.");
+                    localStorage.setItem("arc_api_base", base);
+                    return data;
+                } catch (err) {
+                    if (err instanceof TypeError) { lastErr = err; continue; }
+                    throw err;
+                }
+            }
+            throw lastErr || new Error("Could not connect to the server.");
+        };
+
+        const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+        // ── Shared components ─────────────────────────────────────────────────
+        const Logo = () => html`
+            <div className="flex flex-col items-center gap-2.5 text-center">
+                <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-violet-600 via-indigo-600 to-sky-500 text-white shadow-lg shadow-indigo-500/30">
+                    <${Sparkles} className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                    <p className="text-sm font-extrabold tracking-tight text-neutral-950 dark:text-white">Routine Creator</p>
+                    <p className="mt-0.5 text-xs font-medium text-neutral-500 dark:text-neutral-400">Enterprise workspace</p>
+                </div>
+            </div>
+        `;
+
+        const Btn = ({ variant = "primary", loading = false, className, children, ...rest }) => {
+            const styles = {
+                primary:
+                    "bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-500/22 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-500/30 active:translate-y-0 dark:shadow-indigo-950/30 disabled:opacity-55",
+                secondary:
+                    "border border-neutral-200 bg-white/80 text-neutral-800 hover:-translate-y-0.5 hover:border-neutral-300 hover:bg-white hover:shadow-md active:translate-y-0 dark:border-white/[0.12] dark:bg-white/[0.07] dark:text-neutral-100 dark:hover:border-white/[0.20] dark:hover:bg-white/[0.11]",
+                icon:
+                    "border border-neutral-200 bg-white/70 text-neutral-600 hover:-translate-y-0.5 hover:bg-white hover:shadow-md active:translate-y-0 dark:border-white/[0.10] dark:bg-white/[0.07] dark:text-neutral-300 dark:hover:bg-white/[0.11]",
+            };
+            return html`
+                <button
+                    ...${rest}
+                    disabled=${rest.disabled || loading}
+                    className=${cn(
+                        "inline-flex h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:pointer-events-none",
+                        styles[variant],
+                        className,
+                    )}
+                >
+                    ${loading && html`<${Loader2} className="h-4 w-4 shrink-0 spin" aria-hidden="true" />`}
+                    ${children}
+                </button>
+            `;
+        };
+
+        const Field = ({ id, label, icon: Icon, error, children }) => html`
+            <div className="space-y-1.5">
+                <label htmlFor=${id} className="block text-sm font-semibold text-neutral-700 dark:text-neutral-200">
+                    ${label}
+                </label>
+                <div className=${cn(
+                    "group relative flex h-12 items-center rounded-xl border bg-white/80 transition-all duration-200 dark:bg-white/[0.07]",
+                    error
+                        ? "border-rose-300 shadow-[0_0_0_4px_rgba(244,63,94,0.09)] dark:border-rose-500/60"
+                        : "border-neutral-200 focus-within:border-indigo-400 focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.14)] dark:border-white/[0.10] dark:focus-within:border-indigo-400/80 dark:focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.16)]",
+                )}>
+                    <${Icon} className="ml-3.5 h-4 w-4 shrink-0 text-neutral-400 transition-colors group-focus-within:text-indigo-500 dark:text-neutral-500 dark:group-focus-within:text-indigo-400" aria-hidden="true" />
+                    ${children}
+                </div>
+                ${error && html`<p id="${id}-err" role="alert" className="text-xs font-semibold text-rose-600 dark:text-rose-300">${error}</p>`}
+            </div>
+        `;
+
+        const inputCls = "h-full min-w-0 flex-1 border-0 bg-transparent px-3 text-sm font-medium text-neutral-900 outline-none placeholder:text-neutral-400 focus:ring-0 dark:text-white dark:placeholder:text-neutral-500";
+
+        const Inp = ({ id, error, ...rest }) => html`
+            <input
+                ...${rest}
+                id=${id}
+                aria-invalid=${Boolean(error)}
+                aria-describedby=${error ? `${id}-err` : undefined}
+                className=${cn(inputCls, rest.className)}
+            />
+        `;
+
+        const StatusMsg = ({ msg }) => {
+            if (!msg?.text) return null;
+            const isErr = msg.type === "error";
+            return html`
+                <div
+                    role=${isErr ? "alert" : "status"}
+                    className=${cn(
+                        "rounded-xl border px-3.5 py-2.5 text-sm font-medium",
+                        isErr
+                            ? "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
+                    )}
+                >
+                    ${msg.text}
+                </div>
+            `;
+        };
+
+        const Divider = () => html`
+            <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-neutral-200 dark:bg-white/[0.08]"></div>
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">or</span>
+                <div className="h-px flex-1 bg-neutral-200 dark:bg-white/[0.08]"></div>
+            </div>
+        `;
+
+        const GoogleIcon = () => html`
+            <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+        `;
+
+        const Steps = ({ current }) => html`
+            <div className="flex items-center justify-center gap-1.5" aria-label=${"Step " + current + " of 2"}>
+                <div className=${cn(
+                    "h-1.5 rounded-full transition-all duration-300",
+                    current === 1 ? "w-6 bg-indigo-600 dark:bg-indigo-400" : "w-1.5 bg-neutral-200 dark:bg-white/[0.15]",
+                )}></div>
+                <div className=${cn(
+                    "h-1.5 rounded-full transition-all duration-300",
+                    current === 2 ? "w-6 bg-indigo-600 dark:bg-indigo-400" : "w-1.5 bg-neutral-200 dark:bg-white/[0.15]",
+                )}></div>
+            </div>
+        `;
+
+        // ── Step 1: Email entry ───────────────────────────────────────────────
+        const StepEmail = ({ onContinue }) => {
+            const [email, setEmail] = useState("");
+            const [error, setError] = useState("");
+
+            const submit = (e) => {
+                e.preventDefault();
+                if (!email.trim()) { setError("Enter your email address."); return; }
+                if (!EMAIL_RE.test(email.trim())) { setError("Enter a valid email address."); return; }
+                setError("");
+                onContinue(email.trim());
+            };
+
+            return html`
+                <div className="space-y-6">
+                    <div className="space-y-2 text-center">
+                        <h1 className="text-[1.6rem] font-extrabold leading-tight tracking-tight text-neutral-950 dark:text-white">
+                            Get more done, faster
+                        </h1>
+                        <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                            Already have an account?${" "}
+                            <a href="login.html?from=home" className="font-semibold text-indigo-600 underline-offset-2 transition hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200">
+                                Sign in
+                            </a>
+                        </p>
+                    </div>
+
+                    <${Btn}
+                        type="button"
+                        variant="secondary"
+                        className="w-full justify-center"
+                        onClick=${() => window.alert("Google sign-up is not configured yet. Use email to continue.")}
+                    >
+                        <${GoogleIcon} />
+                        <span>Continue with Google</span>
+                    <//>
+
+                    <${Divider} />
+
+                    <form className="space-y-4" onSubmit=${submit} noValidate>
+                        <${Field} id="s1email" label="Work email" icon=${Mail} error=${error}>
+                            <${Inp}
+                                id="s1email"
+                                type="email"
+                                inputMode="email"
+                                autoComplete="email"
+                                autoFocus
+                                placeholder="name@company.com"
+                                value=${email}
+                                error=${error}
+                                onInput=${(e) => { setEmail(e.currentTarget.value); if (error) setError(""); }}
+                            />
+                        <//>
+
+                        <${Btn} type="submit" className="w-full">
+                            Continue
+                            <${ArrowRight} className="h-4 w-4" aria-hidden="true" />
+                        <//>
+                    </form>
+
+                    <p className="text-center text-[11px] leading-5 text-neutral-400 dark:text-neutral-500">
+                        By continuing you agree to our${" "}
+                        <a href="#" className="underline underline-offset-2 transition hover:text-neutral-600 dark:hover:text-neutral-300">Terms</a>
+                        ${" "}and${" "}
+                        <a href="#" className="underline underline-offset-2 transition hover:text-neutral-600 dark:hover:text-neutral-300">Privacy Policy</a>.
+                    </p>
+                </div>
+            `;
+        };
+
+        // ── Step 2: Full registration ─────────────────────────────────────────
+        const StepRegister = ({ seedEmail }) => {
+            const [name, setName] = useState("");
+            const [email, setEmail] = useState(seedEmail);
+            const [pwd, setPwd] = useState("");
+            const [showPwd, setShowPwd] = useState(false);
+            const [errs, setErrs] = useState({});
+            const [msg, setMsg] = useState({ type: "", text: "" });
+            const [loading, setLoading] = useState(false);
+
+            const clearErr = (key) => setErrs(prev => ({ ...prev, [key]: "" }));
+
+            const validate = () => {
+                const next = {};
+                if (!name.trim() || name.trim().length < 2) next.name = "Enter your full name (min. 2 chars).";
+                if (!email.trim() || !EMAIL_RE.test(email.trim())) next.email = "Enter a valid email address.";
+                if (!pwd || pwd.length < 6) next.pwd = "Password must be at least 6 characters.";
+                setErrs(next);
+                return !Object.keys(next).length;
+            };
+
+            const submit = async (e) => {
+                e.preventDefault();
+                setMsg({ type: "", text: "" });
+                if (!validate()) return;
+                setLoading(true);
+                try {
+                    const data = await postJson("/register", {
+                        name: name.trim(),
+                        email: email.trim(),
+                        password: pwd,
+                    });
+                    setMsg({ type: "success", text: data.message || "Account created! Redirecting to sign in..." });
+                    setTimeout(() => {
+                        window.location.href = "login.html?registered=1&from=home";
+                    }, 900);
+                } catch (err) {
+                    setMsg({ type: "error", text: err.message });
+                    setLoading(false);
+                }
+            };
+
+            return html`
+                <div className="space-y-5">
+                    <div className="space-y-2 text-center">
+                        <h1 className="text-[1.6rem] font-extrabold leading-tight tracking-tight text-neutral-950 dark:text-white">
+                            Seconds to sign up!
+                        </h1>
+                        <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                            Already have an account?${" "}
+                            <a href="login.html?from=home" className="font-semibold text-indigo-600 underline-offset-2 transition hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200">
+                                Sign in
+                            </a>
+                        </p>
+                    </div>
+
+                    <${Btn}
+                        type="button"
+                        variant="secondary"
+                        className="w-full justify-center"
+                        onClick=${() => window.alert("Google sign-up is not configured yet. Use email to continue.")}
+                    >
+                        <${GoogleIcon} />
+                        <span>Continue with Google</span>
+                    <//>
+
+                    <${Divider} />
+
+                    <form className="space-y-4" onSubmit=${submit} noValidate>
+                        <${Field} id="s2name" label="Full name" icon=${User} error=${errs.name}>
+                            <${Inp}
+                                id="s2name"
+                                type="text"
+                                autoComplete="name"
+                                autoFocus
+                                placeholder="Jane Smith"
+                                value=${name}
+                                error=${errs.name}
+                                onInput=${(e) => { setName(e.currentTarget.value); clearErr("name"); }}
+                            />
+                        <//>
+
+                        <${Field} id="s2email" label="Work email" icon=${Mail} error=${errs.email}>
+                            <${Inp}
+                                id="s2email"
+                                type="email"
+                                inputMode="email"
+                                autoComplete="email"
+                                placeholder="name@company.com"
+                                value=${email}
+                                error=${errs.email}
+                                onInput=${(e) => { setEmail(e.currentTarget.value); clearErr("email"); }}
+                            />
+                        <//>
+
+                        <${Field} id="s2pwd" label="Password" icon=${LockKeyhole} error=${errs.pwd}>
+                            <${Inp}
+                                id="s2pwd"
+                                type=${showPwd ? "text" : "password"}
+                                autoComplete="new-password"
+                                placeholder="Create a password (min. 6 chars)"
+                                value=${pwd}
+                                error=${errs.pwd}
+                                className="pr-1"
+                                onInput=${(e) => { setPwd(e.currentTarget.value); clearErr("pwd"); }}
+                            />
+                            <button
+                                type="button"
+                                onClick=${() => setShowPwd(v => !v)}
+                                aria-label=${showPwd ? "Hide password" : "Show password"}
+                                className="mr-2 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-neutral-500 dark:hover:bg-white/10 dark:hover:text-white"
+                            >
+                                ${showPwd
+                                    ? html`<${EyeOff} className="h-4 w-4" aria-hidden="true" />`
+                                    : html`<${Eye} className="h-4 w-4" aria-hidden="true" />`}
+                            </button>
+                        <//>
+
+                        <${StatusMsg} msg=${msg} />
+
+                        <${Btn} type="submit" loading=${loading} className="w-full">
+                            <span>${loading ? "Creating account..." : "Sign up with Email"}</span>
+                            ${!loading && html`<${ArrowRight} className="h-4 w-4" aria-hidden="true" />`}
+                        <//>
+                    </form>
+
+                    <p className="text-center text-[11px] leading-5 text-neutral-400 dark:text-neutral-500">
+                        By signing up you agree to our${" "}
+                        <a href="#" className="underline underline-offset-2 transition hover:text-neutral-600 dark:hover:text-neutral-300">Terms of Service</a>
+                        ${" "}and${" "}
+                        <a href="#" className="underline underline-offset-2 transition hover:text-neutral-600 dark:hover:text-neutral-300">Privacy Policy</a>.
+                    </p>
+                </div>
+            `;
+        };
+
+        // ── Main card shell ───────────────────────────────────────────────────
+        const AuthCard = () => {
+            const shouldReduceMotion = useReducedMotion();
+            const [step, setStep] = useState(1);
+            const [dir, setDir] = useState(1);        // 1 = forward, -1 = back
+            const [seedEmail, setSeedEmail] = useState("");
+
+            const goForward = useCallback((email) => {
+                setDir(1);
+                setSeedEmail(email);
+                setStep(2);
+            }, []);
+
+            const goBack = useCallback(() => {
+                setDir(-1);
+                setStep(1);
+            }, []);
+
+            const reduceOpts = shouldReduceMotion;
+
+            const stepMotion = (direction) => ({
+                initial: reduceOpts ? { opacity: 0 } : { opacity: 0, x: direction * 28, scale: 0.98 },
+                animate: reduceOpts
+                    ? { opacity: 1 }
+                    : { opacity: 1, x: 0, scale: 1, transition: { duration: 0.26, ease: [0.22, 1, 0.36, 1] } },
+                exit: reduceOpts
+                    ? { opacity: 0 }
+                    : { opacity: 0, x: direction * -28, scale: 0.98, transition: { duration: 0.18, ease: "easeIn" } },
+            });
+
+            const cardAnim = shouldReduceMotion ? {} : {
+                initial: { opacity: 0, y: 22, scale: 0.984 },
+                animate: { opacity: 1, y: 0, scale: 1 },
+                transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+            };
+
+            return html`
+                <${motion.section}
+                    ...${cardAnim}
+                    className="relative w-full max-w-[420px] overflow-hidden rounded-2xl border border-white/70 bg-white/[0.85] p-6 shadow-[0_28px_78px_rgba(35,44,87,0.16)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-neutral-950/[0.80] dark:shadow-[0_28px_78px_rgba(0,0,0,0.42)] sm:p-8"
+                    aria-label="Account creation"
+                >
+                    <!-- Back button (step 2 only) -->
+                    ${step === 2 && html`
+                        <button
+                            type="button"
+                            onClick=${goBack}
+                            aria-label="Go back to previous step"
+                            className="absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-xl border border-neutral-200 bg-white/70 text-neutral-600 transition hover:-translate-y-0.5 hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-white/[0.10] dark:bg-white/[0.07] dark:text-neutral-300 dark:hover:bg-white/[0.11] sm:left-5 sm:top-5"
+                        >
+                            <${ArrowLeft} className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                    `}
+
+                    <!-- Logo -->
+                    <div className="mb-5 flex justify-center">
+                        <${Logo} />
+                    </div>
+
+                    <!-- Step dots -->
+                    <div className="mb-6">
+                        <${Steps} current=${step} />
+                    </div>
+
+                    <!-- Step content with slide animation -->
+                    <${AnimatePresence} mode="wait" initial=${false}>
+                        ${step === 1
+                            ? html`
+                                <${motion.div}
+                                    key="step1"
+                                    ...${stepMotion(dir)}
+                                >
+                                    <${StepEmail} onContinue=${goForward} />
+                                <//>
+                            `
+                            : html`
+                                <${motion.div}
+                                    key="step2"
+                                    ...${stepMotion(dir)}
+                                >
+                                    <${StepRegister} seedEmail=${seedEmail} />
+                                <//>
+                            `}
+                    <//>
+                <//>
+            `;
+        };
+
+        // ── App root ──────────────────────────────────────────────────────────
+        const App = () => {
+            // Guard: must come from home or landing page
+            const params = new URLSearchParams(window.location.search);
+            const allowed = params.get("from") === "home";
+
+            useEffect(() => {
+                if (!allowed) window.location.replace(frontendPath("index.html"));
+            }, []);
+
+            if (!allowed) return null;
+
+            return html`
+                <main className="onboard-bg grid min-h-screen place-items-center overflow-x-hidden px-4 py-10 text-neutral-950 dark:text-white sm:px-6">
+                    <!-- Subtle dot grid overlay -->
+                    <div
+                        className="pointer-events-none fixed inset-0 opacity-[0.18] dark:opacity-[0.035]"
+                        style=${{ backgroundImage: "linear-gradient(rgba(99,102,241,0.18) 1px,transparent 1px),linear-gradient(90deg,rgba(99,102,241,0.18) 1px,transparent 1px)", backgroundSize: "64px 64px" }}
+                        aria-hidden="true"
+                    ></div>
+
+                    <div className="relative z-10 flex w-full flex-col items-center gap-5">
+                        <${AuthCard} />
+
+                        <p className="flex items-center gap-1.5 text-center text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                            <${HelpCircle} className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            Need help?${" "}
+                            <a
+                                href="mailto:support@routinecreator.app"
+                                className="font-semibold text-indigo-600 transition hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
+                            >
+                                Contact support
+                            </a>
+                        </p>
+                    </div>
+                </main>
+            `;
+        };
+
+        createRoot(document.getElementById("root")).render(html`<${App} />`);
+    </script>
+</body>
+</html>

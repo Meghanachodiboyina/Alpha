@@ -3,71 +3,1159 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Automated Routine Creator</title>
+    <title>Routine Creator - Focused days. Clear priorities.</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/global.css">
+    <style>
+        :root {
+            color-scheme: light;
+            --page-bg: #f7f8fc;
+            --surface: #ffffff;
+            --surface-soft: rgba(255, 255, 255, 0.76);
+            --ink: #101729;
+            --muted: #516077;
+            --muted-soft: #6d7890;
+            --blue: #5b5ffb;
+            --blue-2: #6366f1;
+            --blue-3: #4f46e5;
+            --orange: #ff7a00;
+            --orange-2: #ff8c42;
+            --green: #16a34a;
+            --line: rgba(101, 116, 139, 0.14);
+            --shadow-soft: 0 20px 60px rgba(15, 23, 42, 0.08);
+            --shadow-card: 0 18px 42px rgba(15, 23, 42, 0.075);
+            --shadow-orange: 0 18px 34px rgba(255, 122, 0, 0.28);
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html {
+            min-height: 100%;
+            background: var(--page-bg) !important;
+            scroll-behavior: smooth;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at 18% 22%, rgba(91, 95, 251, 0.08), transparent 30rem),
+                radial-gradient(circle at 70% 18%, rgba(99, 102, 241, 0.07), transparent 28rem),
+                linear-gradient(180deg, #fbfcff 0%, #f7f8fc 54%, #eef3ff 100%);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        button {
+            font: inherit;
+        }
+
+        .lp-page {
+            min-height: 100vh;
+            padding: 8px 20px 10px;
+            position: relative;
+            overflow-x: clip;
+            isolation: isolate;
+        }
+
+        .lp-page::before {
+            content: "";
+            position: absolute;
+            inset: 122px -8% auto;
+            height: 420px;
+            background:
+                radial-gradient(circle at 22% 40%, rgba(255, 255, 255, 0.8), transparent 18rem),
+                radial-gradient(circle at 70% 50%, rgba(91, 95, 251, 0.07), transparent 20rem);
+            z-index: -2;
+            pointer-events: none;
+        }
+
+        .lp-page::after {
+            content: "";
+            position: absolute;
+            left: -8%;
+            right: -8%;
+            bottom: 0;
+            height: 132px;
+            background: linear-gradient(135deg, rgba(91, 95, 251, 0.11), rgba(79, 70, 229, 0.03));
+            clip-path: ellipse(62% 52% at 35% 88%);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .lp-header {
+            width: min(1560px, 100%);
+            min-height: 96px;
+            margin: 0 auto;
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            border-radius: 26px;
+            background: rgba(255, 255, 255, 0.82);
+            box-shadow: 0 18px 54px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(22px);
+        }
+
+        .lp-brand {
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .lp-brand-mark {
+            width: 58px;
+            height: 58px;
+            flex: 0 0 auto;
+            display: grid;
+            place-items: center;
+            border-radius: 16px;
+            color: #fff;
+            background: linear-gradient(145deg, #6f75ff 0%, var(--blue-3) 100%);
+            box-shadow: 0 14px 30px rgba(79, 70, 229, 0.26);
+            font-size: 1.04rem;
+            font-weight: 900;
+            letter-spacing: 0;
+        }
+
+        .lp-brand-copy {
+            min-width: 0;
+            display: grid;
+            gap: 3px;
+        }
+
+        .lp-brand-copy strong {
+            color: var(--ink);
+            font-size: 1.36rem;
+            line-height: 1.1;
+            font-weight: 900;
+            letter-spacing: 0;
+        }
+
+        .lp-brand-copy span {
+            color: var(--muted);
+            font-size: 1rem;
+            line-height: 1.35;
+            font-weight: 650;
+            white-space: normal;
+        }
+
+        .lp-nav {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex: 0 0 auto;
+        }
+
+        .lp-login-btn,
+        .lp-cta-btn {
+            min-height: 58px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 18px;
+            font-size: 1rem;
+            font-weight: 800;
+            transition:
+                transform 170ms ease,
+                box-shadow 170ms ease,
+                border-color 170ms ease,
+                background 170ms ease;
+        }
+
+        .lp-login-btn {
+            min-width: 112px;
+            color: var(--ink);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            background: rgba(255, 255, 255, 0.68);
+        }
+
+        .lp-cta-btn {
+            min-width: 154px;
+            color: #fff;
+            border: 0;
+            background: linear-gradient(145deg, var(--orange-2) 0%, var(--orange) 92%);
+            box-shadow: var(--shadow-orange);
+        }
+
+        .lp-login-btn:hover,
+        .lp-cta-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .lp-login-btn:hover {
+            border-color: rgba(91, 95, 251, 0.22);
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+        }
+
+        .lp-cta-btn:hover {
+            box-shadow: 0 22px 42px rgba(255, 122, 0, 0.34);
+        }
+
+        .lp-hero {
+            width: min(1500px, 100%);
+            min-height: calc(100vh - 114px);
+            margin: 0 auto;
+            padding: 42px 44px 22px;
+            display: grid;
+            grid-template-columns: minmax(520px, 600px) minmax(260px, 340px) minmax(420px, 500px);
+            align-items: center;
+            justify-content: space-between;
+            gap: 28px;
+        }
+
+        .lp-hero-copy {
+            max-width: 600px;
+            display: grid;
+            gap: 28px;
+            align-content: center;
+            transform: translateY(-54px);
+            z-index: 2;
+        }
+
+        .lp-badge {
+            width: fit-content;
+            min-height: 39px;
+            padding: 0 16px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #3158f6;
+            border: 1px solid rgba(91, 95, 251, 0.16);
+            border-radius: 999px;
+            background: rgba(91, 95, 251, 0.09);
+            font-size: 0.86rem;
+            line-height: 1;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0;
+        }
+
+        .lp-badge svg {
+            width: 16px;
+            height: 16px;
+            color: var(--orange-2);
+        }
+
+        .lp-hero-heading {
+            max-width: 600px;
+            margin: 0;
+            color: var(--ink);
+            font-size: clamp(46px, 3.25vw, 52px);
+            line-height: 1.18;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .hero-word-primary {
+            color: var(--blue);
+        }
+
+        .hero-word-accent {
+            color: var(--orange);
+        }
+
+        .lp-hero-sub {
+            max-width: 500px;
+            margin: 0;
+            color: var(--muted);
+            font-size: 1.08rem;
+            line-height: 1.72;
+            font-weight: 560;
+        }
+
+        .mobile-copy {
+            display: none;
+        }
+
+        .lp-feature-card {
+            width: min(100%, 472px);
+            min-height: 98px;
+            padding: 16px 18px;
+            display: grid;
+            grid-template-columns: 56px 1fr 24px;
+            align-items: center;
+            gap: 16px;
+            color: inherit;
+            border: 1px solid rgba(148, 163, 184, 0.12);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.86);
+            box-shadow: var(--shadow-card);
+            transition:
+                transform 170ms ease,
+                box-shadow 170ms ease,
+                border-color 170ms ease;
+        }
+
+        .lp-feature-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(91, 95, 251, 0.2);
+            box-shadow: 0 24px 54px rgba(15, 23, 42, 0.11);
+        }
+
+        .lp-feature-icon,
+        .lp-routine-icon {
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+        }
+
+        .lp-feature-icon {
+            width: 56px;
+            height: 56px;
+            color: var(--blue);
+            background: rgba(91, 95, 251, 0.1);
+        }
+
+        .lp-feature-icon svg,
+        .lp-routine-icon svg {
+            width: 25px;
+            height: 25px;
+        }
+
+        .lp-feature-copy {
+            min-width: 0;
+            display: grid;
+            gap: 5px;
+        }
+
+        .lp-feature-copy strong,
+        .lp-routine-copy strong,
+        .lp-preview-title {
+            color: var(--ink);
+            font-weight: 900;
+            letter-spacing: 0;
+        }
+
+        .lp-feature-copy strong {
+            font-size: 1rem;
+            line-height: 1.25;
+        }
+
+        .lp-feature-copy p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.94rem;
+            line-height: 1.55;
+            font-weight: 560;
+        }
+
+        .lp-feature-chevron,
+        .lp-routine-chevron {
+            display: grid;
+            place-items: center;
+            color: #637086;
+        }
+
+        .lp-feature-chevron svg,
+        .lp-routine-chevron svg {
+            width: 21px;
+            height: 21px;
+        }
+
+        .lp-hero-visual {
+            position: relative;
+            width: min(100%, 360px);
+            height: 430px;
+            justify-self: center;
+            transform: translateY(-24px);
+            z-index: 1;
+        }
+
+        .illus-glow {
+            position: absolute;
+            inset: 68px 6px 42px;
+            border-radius: 50%;
+            background:
+                radial-gradient(circle at 45% 46%, rgba(91, 95, 251, 0.18), transparent 54%),
+                radial-gradient(circle at 64% 72%, rgba(255, 122, 0, 0.14), transparent 28%);
+            filter: blur(1px);
+        }
+
+        .illus-calendar {
+            position: absolute;
+            left: 52px;
+            top: 70px;
+            width: 236px;
+            height: 282px;
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            border-radius: 30px;
+            background: #fff;
+            box-shadow:
+                0 34px 70px rgba(91, 95, 251, 0.22),
+                0 12px 24px rgba(15, 23, 42, 0.08);
+            overflow: hidden;
+            transform: rotate(7deg);
+        }
+
+        .illus-calendar-header {
+            height: 76px;
+            background: linear-gradient(145deg, #5867ff 0%, #747fff 100%);
+            position: relative;
+        }
+
+        .illus-rings {
+            position: absolute;
+            top: -12px;
+            left: 72px;
+            display: flex;
+            gap: 30px;
+        }
+
+        .illus-ring {
+            width: 17px;
+            height: 39px;
+            border: 5px solid rgba(255, 255, 255, 0.74);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.22);
+        }
+
+        .illus-calendar-grid {
+            padding: 26px 24px 24px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .illus-cell {
+            height: 35px;
+            border-radius: 10px;
+            background: #edf2ff;
+            box-shadow:
+                inset 0 -2px 8px rgba(91, 95, 251, 0.08),
+                0 4px 10px rgba(15, 23, 42, 0.035);
+        }
+
+        .illus-cell.active {
+            display: grid;
+            place-items: center;
+            color: #fff;
+            background: linear-gradient(145deg, #6572ff, #4565f5);
+            font-weight: 900;
+        }
+
+        .illus-cell.accent {
+            border: 2px solid rgba(255, 122, 0, 0.48);
+            background: rgba(255, 122, 0, 0.08);
+        }
+
+        .illus-clock {
+            position: absolute;
+            right: 22px;
+            bottom: 52px;
+            width: 108px;
+            height: 108px;
+            display: grid;
+            place-items: center;
+            color: #fff;
+            border: 8px solid #fff;
+            border-radius: 50%;
+            background: linear-gradient(145deg, var(--orange-2) 0%, var(--orange) 100%);
+            box-shadow: 0 22px 42px rgba(255, 122, 0, 0.32);
+        }
+
+        .illus-clock svg {
+            width: 50px;
+            height: 50px;
+        }
+
+        .spark {
+            position: absolute;
+            display: block;
+            background: var(--orange-2);
+            clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+            filter: drop-shadow(0 8px 14px rgba(255, 122, 0, 0.16));
+        }
+
+        .spark.one {
+            width: 14px;
+            height: 14px;
+            top: 72px;
+            right: 8px;
+        }
+
+        .spark.two {
+            width: 9px;
+            height: 9px;
+            left: 26px;
+            bottom: 126px;
+            opacity: 0.75;
+        }
+
+        .spark.three {
+            width: 11px;
+            height: 11px;
+            right: 58px;
+            bottom: 30px;
+            opacity: 0.74;
+        }
+
+        .spark.four {
+            width: 8px;
+            height: 8px;
+            right: 18px;
+            top: 205px;
+            background: rgba(91, 95, 251, 0.42);
+        }
+
+        .lp-preview-panel {
+            width: 100%;
+            max-width: 510px;
+            justify-self: end;
+            padding: 28px;
+            border: 1px solid rgba(148, 163, 184, 0.1);
+            border-radius: 30px;
+            background: rgba(255, 255, 255, 0.72);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(22px);
+        }
+
+        .lp-preview-header {
+            margin-bottom: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+        }
+
+        .lp-preview-title {
+            margin: 0;
+            font-size: 1.58rem;
+            line-height: 1.2;
+        }
+
+        .lp-today-badge {
+            min-height: 38px;
+            padding: 0 16px;
+            display: inline-flex;
+            align-items: center;
+            color: var(--green);
+            border-radius: 999px;
+            background: rgba(22, 163, 74, 0.12);
+            font-size: 0.9rem;
+            line-height: 1;
+            font-weight: 900;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .lp-routine-list {
+            display: grid;
+            gap: 16px;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .lp-routine-item {
+            min-height: 112px;
+            padding: 18px;
+            display: grid;
+            grid-template-columns: 62px 1fr 24px;
+            align-items: center;
+            gap: 18px;
+            border: 1px solid rgba(148, 163, 184, 0.08);
+            border-radius: 24px;
+            background: #fff;
+            box-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
+            transition:
+                transform 170ms ease,
+                box-shadow 170ms ease,
+                border-color 170ms ease;
+        }
+
+        .lp-routine-item:hover {
+            transform: translateY(-2px);
+            border-color: rgba(91, 95, 251, 0.16);
+            box-shadow: 0 22px 46px rgba(15, 23, 42, 0.09);
+        }
+
+        .lp-routine-icon {
+            width: 62px;
+            height: 62px;
+            color: #fff;
+        }
+
+        .routine-blue {
+            background: linear-gradient(145deg, #4d7cff, #2563eb);
+        }
+
+        .routine-orange {
+            background: linear-gradient(145deg, var(--orange-2), #f05a00);
+        }
+
+        .routine-green {
+            background: linear-gradient(145deg, #2dcc70, var(--green));
+        }
+
+        .lp-routine-copy {
+            min-width: 0;
+            display: grid;
+            gap: 4px;
+        }
+
+        .lp-routine-copy strong {
+            font-size: 1.06rem;
+            line-height: 1.22;
+        }
+
+        .lp-routine-copy time {
+            color: var(--muted);
+            font-size: 0.98rem;
+            font-weight: 650;
+        }
+
+        .lp-routine-copy small {
+            font-size: 0.93rem;
+            line-height: 1.35;
+            font-weight: 800;
+        }
+
+        .priority-blue {
+            color: #3158f6;
+        }
+
+        .priority-orange {
+            color: var(--orange);
+        }
+
+        .priority-green {
+            color: var(--green);
+        }
+
+        @media (max-width: 1360px) {
+            .lp-hero {
+                grid-template-columns: minmax(450px, 540px) minmax(230px, 300px) minmax(380px, 460px);
+                gap: 28px;
+                padding-inline: 28px;
+            }
+
+            .lp-hero-heading {
+                font-size: clamp(44px, 3vw, 50px);
+            }
+
+            .lp-preview-panel {
+                padding: 24px;
+            }
+
+            .lp-routine-item {
+                min-height: 104px;
+            }
+        }
+
+        @media (max-width: 1120px) {
+            .lp-hero {
+                min-height: auto;
+                grid-template-columns: minmax(0, 1fr) minmax(360px, 500px);
+                align-items: start;
+                gap: 44px;
+                padding: 56px 24px 48px;
+            }
+
+            .lp-hero-copy {
+                max-width: 560px;
+                transform: none;
+            }
+
+            .lp-hero-heading {
+                max-width: 560px;
+            }
+
+            .lp-hero-visual {
+                grid-column: 1 / -1;
+                grid-row: 2;
+                height: 380px;
+                margin: -24px auto -16px;
+                transform: none;
+            }
+
+            .lp-preview-panel {
+                grid-column: 2;
+                grid-row: 1 / span 2;
+                align-self: center;
+                justify-self: stretch;
+                transform: none;
+            }
+        }
+
+        @media (max-width: 860px) {
+            .lp-page {
+                padding: 10px 12px 24px;
+            }
+
+            .lp-header {
+                min-height: auto;
+                align-items: flex-start;
+                padding: 14px;
+                border-radius: 22px;
+            }
+
+            .lp-brand-mark {
+                width: 50px;
+                height: 50px;
+            }
+
+            .lp-brand-copy strong {
+                font-size: 1.08rem;
+            }
+
+            .lp-brand-copy span {
+                font-size: 0.86rem;
+            }
+
+            .lp-nav {
+                gap: 8px;
+            }
+
+            .lp-login-btn,
+            .lp-cta-btn {
+                min-height: 46px;
+                border-radius: 14px;
+                font-size: 0.86rem;
+            }
+
+            .lp-login-btn {
+                min-width: 78px;
+            }
+
+            .lp-cta-btn {
+                min-width: 118px;
+            }
+
+            .lp-hero {
+                grid-template-columns: 1fr;
+                gap: 28px;
+                padding: 40px 10px 34px;
+            }
+
+            .lp-hero-copy,
+            .lp-hero-heading,
+            .lp-hero-sub {
+                max-width: 100%;
+                min-width: 0;
+                width: 100%;
+            }
+
+            .lp-hero-visual {
+                grid-column: auto;
+                grid-row: auto;
+                height: 360px;
+                margin: 0 auto;
+                transform: none;
+            }
+
+            .lp-preview-panel {
+                grid-column: auto;
+                grid-row: auto;
+                max-width: 100%;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .lp-header {
+                flex-direction: column;
+                gap: 14px;
+                overflow: hidden;
+                width: 100%;
+                max-width: calc(100vw - 24px);
+            }
+
+            .lp-brand {
+                width: 100%;
+            }
+
+            .lp-brand-copy span {
+                max-width: 250px;
+                font-size: 0.78rem;
+                line-height: 1.3;
+                overflow-wrap: anywhere;
+            }
+
+            .lp-nav {
+                width: 100%;
+                max-width: 100%;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+                gap: 6px;
+            }
+
+            .lp-login-btn,
+            .lp-cta-btn {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .lp-cta-btn {
+                max-width: 100%;
+                justify-self: stretch;
+                font-size: 0.8rem;
+            }
+
+            .lp-hero {
+                padding-top: 32px;
+                width: 100%;
+                max-width: 100%;
+                overflow: hidden;
+            }
+
+            .lp-hero-copy {
+                inline-size: calc(100vw - 44px);
+                max-inline-size: calc(100vw - 44px);
+            }
+
+            .lp-badge {
+                min-height: 34px;
+                padding: 0 12px;
+                font-size: 0.76rem;
+            }
+
+            .lp-hero-heading {
+                max-width: calc(100vw - 44px);
+                font-size: clamp(32px, 9vw, 35px);
+                line-height: 1.14;
+                white-space: normal;
+                overflow-wrap: normal;
+            }
+
+            .lp-hero-sub {
+                max-width: calc(100vw - 44px);
+                inline-size: calc(100vw - 44px);
+                white-space: normal;
+                word-break: normal;
+                font-size: 0.96rem;
+                line-height: 1.65;
+                overflow-wrap: break-word;
+            }
+
+            .desktop-copy {
+                display: none;
+            }
+
+            .mobile-copy {
+                display: inline;
+            }
+
+            .lp-feature-card {
+                max-width: calc(100vw - 44px);
+                grid-template-columns: 52px 1fr 18px;
+                gap: 12px;
+                min-height: 92px;
+                padding: 14px;
+            }
+
+            .lp-feature-icon,
+            .lp-routine-icon {
+                width: 52px;
+                height: 52px;
+            }
+
+            .lp-feature-icon svg,
+            .lp-routine-icon svg {
+                width: 22px;
+                height: 22px;
+            }
+
+            .lp-hero-visual {
+                width: 300px;
+                height: 320px;
+            }
+
+            .illus-calendar {
+                left: 42px;
+                top: 44px;
+                width: 204px;
+                height: 244px;
+                border-radius: 25px;
+            }
+
+            .illus-calendar-header {
+                height: 66px;
+            }
+
+            .illus-rings {
+                left: 62px;
+                gap: 24px;
+            }
+
+            .illus-calendar-grid {
+                padding: 22px 20px;
+                gap: 10px;
+            }
+
+            .illus-cell {
+                height: 29px;
+                border-radius: 8px;
+            }
+
+            .illus-clock {
+                right: 18px;
+                bottom: 30px;
+                width: 88px;
+                height: 88px;
+                border-width: 7px;
+            }
+
+            .illus-clock svg {
+                width: 40px;
+                height: 40px;
+            }
+
+            .lp-preview-panel {
+                padding: 18px;
+                border-radius: 24px;
+            }
+
+            .lp-preview-title {
+                font-size: 1.25rem;
+            }
+
+            .lp-routine-list {
+                gap: 12px;
+            }
+
+            .lp-routine-item {
+                grid-template-columns: 52px 1fr 18px;
+                gap: 12px;
+                min-height: 98px;
+                padding: 14px;
+                border-radius: 20px;
+            }
+
+            .lp-routine-copy strong {
+                font-size: 0.98rem;
+            }
+
+            .lp-routine-copy time,
+            .lp-routine-copy small {
+                font-size: 0.86rem;
+            }
+        }
+    </style>
 </head>
-<body class="landing-body">
-    <div class="landing-shell">
-        <header class="landing-header glass landing-header-rich">
-            <div class="brand">
-                <span class="brand-mark brand-mark-large">ARC</span>
-                <div>
-                    <h1>Automated Routine Creator</h1>
-                    <p>Focused days. Clear priorities. Smarter weekly planning.</p>
-                </div>
-            </div>
-            <nav class="landing-nav">
-                <a href="login.html?from=home" class="ghost-button">Login</a>
-                <a href="register.html?from=home" class="primary-button">Get Started</a>
+<body data-rc-page="home">
+    <div class="lp-page">
+        <header class="lp-header">
+            <a class="lp-brand" href="index.html" aria-label="Routine Creator home">
+                <span class="lp-brand-mark">ARC</span>
+                <span class="lp-brand-copy">
+                    <strong>Routine Creator</strong>
+                    <span>Focused days. Clear priorities. Smarter weekly planning.</span>
+                </span>
+            </a>
+
+            <nav class="lp-nav" aria-label="Landing actions">
+                <a href="auth/login.html?from=home" class="lp-login-btn">Login</a>
+                <a href="auth/register.html?from=home" class="lp-cta-btn">Get Started</a>
             </nav>
         </header>
 
-        <main class="hero-grid hero-grid-rich">
-            <section class="hero-copy">
-                <span class="badge">AI + Manual Planning</span>
-                <h2>Shape a focused day with calm structure, smart timing, and less chaos.</h2>
-                <p>
-                    Capture ideas fast, let AI build a more realistic plan, and manage your routines from a dashboard
-                    that feels clearer, lighter, and easier to trust every day.
+        <main class="lp-hero">
+            <section class="lp-hero-copy">
+                <span class="lp-badge">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"></path>
+                    </svg>
+                    AI + Manual Planning
+                </span>
+
+                <h1 class="lp-hero-heading">
+                    Shape a focused day<br>
+                    with calm structure,<br>
+                    <span class="hero-word-primary">smart timing</span>, and<br>
+                    <span class="hero-word-accent">less chaos.</span>
+                </h1>
+
+                <p class="lp-hero-sub">
+                    <span class="desktop-copy">Capture ideas fast, let AI build a more realistic plan, and manage your routines from a dashboard that feels clearer, lighter, and easier to trust every day.</span>
+                    <span class="mobile-copy">Capture ideas fast, let AI build a more<br>realistic plan, and manage routines<br>from a dashboard that feels clearer,<br>lighter, and easier to trust every day.</span>
                 </p>
-                <div class="auth-feature-grid hero-metrics">
-                    <article class="overview-note">
-                        <h4>Daily + Weekly Views</h4>
-                        <p>See today’s focus and the week ahead without mixing everything together.</p>
-                    </article>
-                </div>
+
+                <a href="auth/register.html?from=home" class="lp-feature-card">
+                    <span class="lp-feature-icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 3v18h18"></path>
+                            <path d="M7 16V9"></path>
+                            <path d="M12 16V5"></path>
+                            <path d="M17 16v-3"></path>
+                        </svg>
+                    </span>
+                    <span class="lp-feature-copy">
+                        <strong>Daily + Weekly Views</strong>
+                        <p>See today's focus and the week ahead without mixing everything together.</p>
+                    </span>
+                    <span class="lp-feature-chevron" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m9 18 6-6-6-6"></path>
+                        </svg>
+                    </span>
+                </a>
             </section>
 
-            <section class="hero-card glass landing-showcase">
-                <div class="hero-card-top">
-                    <h3>Example AI Routine</h3>
-                    <span class="tag info">Today</span>
+            <div class="lp-hero-visual" aria-hidden="true">
+                <div class="illus-glow"></div>
+                <div class="illus-calendar">
+                    <div class="illus-calendar-header">
+                        <div class="illus-rings">
+                            <span class="illus-ring"></span>
+                            <span class="illus-ring"></span>
+                        </div>
+                    </div>
+                    <div class="illus-calendar-grid">
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell active">&#10003;</span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell accent"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell active">&#10003;</span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell accent"></span>
+                        <span class="illus-cell"></span>
+                        <span class="illus-cell"></span>
+                    </div>
                 </div>
-                <div class="planner-preview">
-                    <article>
-                        <strong>Deep Study Block</strong>
-                        <span>08:00 AM - 10:00 AM</span>
-                        <small>High Priority • Focus first</small>
-                    </article>
-                    <article>
-                        <strong>Project Sprint</strong>
-                        <span>10:15 AM - 01:15 PM</span>
-                        <small>High Priority • Progress milestone</small>
-                    </article>
-                    <article>
-                        <strong>Meeting</strong>
-                        <span>04:00 PM - 05:00 PM</span>
-                        <small>High Priority • Exact time respected</small>
-                    </article>
-                    <article>
-                        <strong>Gym</strong>
-                        <span>06:30 PM - 07:45 PM</span>
-                        <small>Medium Priority • Evening default</small>
-                    </article>
+                <div class="illus-clock">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 6v6l4 2"></path>
+                    </svg>
                 </div>
+                <span class="spark one"></span>
+                <span class="spark two"></span>
+                <span class="spark three"></span>
+                <span class="spark four"></span>
+            </div>
+
+            <section class="lp-preview-panel" aria-label="Example AI routine">
+                <div class="lp-preview-header">
+                    <h2 class="lp-preview-title">Example AI Routine</h2>
+                    <span class="lp-today-badge">Today</span>
+                </div>
+
+                <ul class="lp-routine-list">
+                    <li class="lp-routine-item">
+                        <span class="lp-routine-icon routine-blue" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                            </svg>
+                        </span>
+                        <span class="lp-routine-copy">
+                            <strong>Deep Study Block</strong>
+                            <time>08:00 AM - 10:00 AM</time>
+                            <small class="priority-blue">High Priority - Focus first</small>
+                        </span>
+                        <span class="lp-routine-chevron" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m9 18 6-6-6-6"></path>
+                            </svg>
+                        </span>
+                    </li>
+
+                    <li class="lp-routine-item">
+                        <span class="lp-routine-icon routine-orange" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2.1-.1-2.9a2.2 2.2 0 0 0-2.9-.1Z"></path>
+                                <path d="m12 15-3-3a22 22 0 0 1 2-4A12.9 12.9 0 0 1 22 2c0 2.7-.8 7.5-6 11a22 22 0 0 1-4 2Z"></path>
+                                <path d="M9 12H4s.5-3 2-4c1.6-1.1 5 0 5 0"></path>
+                                <path d="M12 15v5s3-.5 4-2c1.1-1.6 0-5 0-5"></path>
+                            </svg>
+                        </span>
+                        <span class="lp-routine-copy">
+                            <strong>Project Sprint</strong>
+                            <time>10:15 AM - 01:15 PM</time>
+                            <small class="priority-orange">High Priority - Progress milestone</small>
+                        </span>
+                        <span class="lp-routine-chevron" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m9 18 6-6-6-6"></path>
+                            </svg>
+                        </span>
+                    </li>
+
+                    <li class="lp-routine-item">
+                        <span class="lp-routine-icon routine-blue" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M22 21v-2a4 4 0 0 0-3-3.9"></path>
+                                <path d="M16 3.1a4 4 0 0 1 0 7.8"></path>
+                            </svg>
+                        </span>
+                        <span class="lp-routine-copy">
+                            <strong>Meeting</strong>
+                            <time>04:00 PM - 05:00 PM</time>
+                            <small class="priority-blue">High Priority - Exact time respected</small>
+                        </span>
+                        <span class="lp-routine-chevron" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m9 18 6-6-6-6"></path>
+                            </svg>
+                        </span>
+                    </li>
+
+                    <li class="lp-routine-item">
+                        <span class="lp-routine-icon routine-green" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m6.5 6.5 11 11"></path>
+                                <path d="m21 2-4.3 4.3"></path>
+                                <path d="M3 22l4.3-4.3"></path>
+                                <path d="M14 7a2 2 0 1 0-4 0"></path>
+                                <path d="M12 10.5c0 4.7-3.5 7.3-3.5 7.3s-.5.2-.5.7.6.5.6.5h6.9s.4-.1.5-.6-.5-.7-.5-.7S12 14.9 12 10.5Z"></path>
+                            </svg>
+                        </span>
+                        <span class="lp-routine-copy">
+                            <strong>Gym</strong>
+                            <time>06:30 PM - 07:45 PM</time>
+                            <small class="priority-green">Medium Priority - Health first</small>
+                        </span>
+                        <span class="lp-routine-chevron" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m9 18 6-6-6-6"></path>
+                            </svg>
+                        </span>
+                    </li>
+
+                    <li class="lp-routine-item">
+                        <span class="lp-routine-icon routine-orange" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 3a2.9 2.9 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
+                                <path d="m15 5 4 4"></path>
+                            </svg>
+                        </span>
+                        <span class="lp-routine-copy">
+                            <strong>Evening Review</strong>
+                            <time>08:30 PM - 09:00 PM</time>
+                            <small class="priority-orange">Low Priority - Wind down &amp; reflect</small>
+                        </span>
+                        <span class="lp-routine-chevron" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m9 18 6-6-6-6"></path>
+                            </svg>
+                        </span>
+                    </li>
+                </ul>
             </section>
         </main>
     </div>

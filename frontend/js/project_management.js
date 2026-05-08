@@ -1,6 +1,13 @@
 const API_BASE = "http://127.0.0.1:8000";
 const token = localStorage.getItem("arc_token");
 const currentUser = JSON.parse(localStorage.getItem("arc_user") || "null");
+const clearSessionStorage = () => {
+    const theme = localStorage.getItem("arc_theme");
+    const apiBase = localStorage.getItem("arc_api_base");
+    localStorage.clear();
+    if (theme) localStorage.setItem("arc_theme", theme);
+    if (apiBase) localStorage.setItem("arc_api_base", apiBase);
+};
 
 if (!token) {
     window.location.href = "index.html";
@@ -399,7 +406,7 @@ const refreshWorkspace = async () => {
         renderViews();
     } catch (error) {
         if (error.message.toLowerCase().includes("credentials")) {
-            localStorage.clear();
+            clearSessionStorage();
             window.location.href = "index.html";
             return;
         }
@@ -534,7 +541,7 @@ document.getElementById("openTaskModalButton").addEventListener("click", () => o
 document.getElementById("closeTaskModalButton").addEventListener("click", closeTaskModal);
 document.getElementById("resetTaskFormButton").addEventListener("click", resetTaskForm);
 document.getElementById("projectLogoutButton").addEventListener("click", () => {
-    localStorage.clear();
+    clearSessionStorage();
     window.location.href = "index.html";
 });
 

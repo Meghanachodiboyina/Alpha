@@ -1,0 +1,1024 @@
+/* ════════════════════════════════════════════════════════════════
+   RESPONSIVE.CSS  —  Mobile-first cross-breakpoint improvements
+   Breakpoints: 1200px · 992px · 768px · 576px · 400px
+   ════════════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════
+   MOBILE SIDEBAR OVERLAY
+   ══════════════════════════════════════════ */
+
+/* Inject a full-screen scrim when the sidebar drawer is open on mobile */
+@media (max-width: 900px) {
+  body.rc-sidebar-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 998; /* below sidebar z-index 1000 */
+    background: rgba(0, 0, 0, 0.52);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    animation: rc-overlay-in 180ms ease;
+  }
+}
+
+@keyframes rc-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Sidebar slide-in animation on mobile */
+@media (max-width: 900px) {
+  body.rc-sidebar-open .rc-global-sidebar,
+  body.rc-sidebar-open .sidebar {
+    animation: rc-sidebar-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes rc-sidebar-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+/* ══════════════════════════════════════════
+   GLOBAL BASE — overflow & scroll safety
+   ══════════════════════════════════════════ */
+
+html, body {
+  overflow-x: hidden;
+}
+
+/* All images/media scale down inside containers */
+img, video, canvas, svg {
+  max-width: 100%;
+}
+
+/* Touch-friendly minimum tap target */
+@media (max-width: 900px) {
+  .button,
+  .primary-button,
+  .secondary-button,
+  .ghost-button,
+  .accent-button,
+  .sidebar-item,
+  .rc-nav-icon-button,
+  .lp-login-btn,
+  .lp-cta-btn {
+    min-height: 44px;
+  }
+
+  /* Scrollable overflows */
+  .workspace-table-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+}
+
+/* ══════════════════════════════════════════
+   1200px — LARGE TABLET / SMALL LAPTOP
+   ══════════════════════════════════════════ */
+
+@media (max-width: 1200px) {
+  /* Tighten sidebar */
+  :root {
+    --sidebar-width: 240px;
+  }
+
+  /* Stat cards: 5→3 */
+  .dashboard-stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* Category cards: 5→3 */
+  .rc-category-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* Workspace board: 3→2 */
+  .workspace-board {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+
+  /* Workspace summary strip: 4→2 */
+  .workspace-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Report grid: 3→2 */
+  .workspace-report-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Compress page padding slightly */
+  .app-main,
+  .main {
+    padding: 28px 24px;
+  }
+
+  /* Dashboard hero: make illustration smaller */
+  .dashboard-hero-illustration {
+    width: 120px;
+    height: 100px;
+  }
+
+  .hero-illus-calendar {
+    width: 78px;
+    height: 78px;
+    border-radius: 14px;
+  }
+
+  .hero-illus-clock {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* ══════════════════════════════════════════
+   992px — TABLET
+   ══════════════════════════════════════════ */
+
+@media (max-width: 992px) {
+  /* Sidebar: tighter */
+  :root {
+    --sidebar-width: 220px;
+  }
+
+  /* Page padding */
+  .app-main,
+  .main {
+    padding: 24px 18px;
+  }
+
+  /* Dashboard hero: stack left copy + tabs, hide illustration */
+  .dashboard-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 20px 22px;
+    gap: 18px;
+  }
+
+  .dashboard-hero-illustration {
+    display: none;
+  }
+
+  .dashboard-tabs {
+    width: 100%;
+    max-width: 360px;
+  }
+
+  /* Stat cards: 3→2 */
+  .dashboard-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Category cards: 3→2 */
+  .rc-category-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Report grid: 2→2 (keep) */
+
+  /* Workspace shell: single column */
+  .workspace-shell {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .workspace-sidebar {
+    position: static;
+    max-height: none;
+  }
+
+  /* Workspace utility nav: horizontal on tablet */
+  .workspace-utility-nav,
+  .workspace-sidebar-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .workspace-tool-button,
+  .workspace-project-item {
+    min-width: 120px;
+    flex: 1 1 120px;
+  }
+
+  /* Page grid: 12→6 col for spans */
+  .span-3,
+  .span-4 {
+    grid-column: span 6;
+  }
+
+  /* Headings scale down */
+  h3 { font-size: 17px; }
+
+  /* Insight grid: stack */
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Dashboard form: 2→1 col */
+  .dashboard-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Summary strip */
+  .workspace-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ══════════════════════════════════════════
+   768px — LARGE PHONE / SMALL TABLET
+   ══════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Page padding: compact */
+  .app-main,
+  .main {
+    padding: 16px;
+  }
+
+  .page-stack {
+    gap: 16px;
+  }
+
+  .page-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  /* All spans: full width */
+  .span-3,
+  .span-4,
+  .span-5,
+  .span-6,
+  .span-7,
+  .span-8,
+  .span-12 {
+    grid-column: 1;
+  }
+
+  /* ── Dashboard Hero ── */
+  .dashboard-hero {
+    flex-direction: column;
+    padding: 16px;
+    border-radius: var(--radius-lg);
+    gap: 14px;
+  }
+
+  .dashboard-hero-copy h1 {
+    font-size: clamp(17px, 5vw, 23px);
+    line-height: 1.3;
+  }
+
+  .dashboard-hero-copy p {
+    font-size: 13px;
+  }
+
+  .dashboard-tabs {
+    width: 100%;
+    max-width: 100%;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  /* ── Stat Cards: 2 columns ── */
+  .dashboard-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .dashboard-stat {
+    padding: 16px 16px 60px;
+    min-height: 140px;
+  }
+
+  .dashboard-stat > strong {
+    font-size: 32px;
+  }
+
+  .stat-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .stat-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* ── Cards ── */
+  .card {
+    padding: 18px;
+    border-radius: var(--radius);
+  }
+
+  /* ── Section headers ── */
+  .section-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .section-header h3 {
+    font-size: 15px;
+  }
+
+  /* ── Typography ── */
+  h3 { font-size: 16px; }
+  h4 { font-size: 14px; }
+  body { font-size: 14px; }
+
+  /* ── Forms ── */
+  .dashboard-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-span {
+    grid-column: 1;
+  }
+
+  .filter-bar {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .filter-bar label {
+    min-width: 100%;
+    flex: 1;
+  }
+
+  /* ── Form actions ── */
+  .form-actions,
+  .workspace-header-actions,
+  .routine-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .form-actions .primary-button,
+  .form-actions .secondary-button,
+  .form-actions .ghost-button {
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+
+  /* ── Workspace ── */
+  .workspace-shell {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .workspace-sidebar {
+    position: static;
+    max-height: none;
+    padding-right: 0;
+  }
+
+  body.rc-system .workspace-shell {
+    padding: 12px;
+  }
+
+  .workspace-primary-toolbar {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .workspace-view-command-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .workspace-view-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .workspace-view-switch {
+    width: 100%;
+  }
+
+  .workspace-view-button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .workspace-board {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .workspace-kanban-column {
+    max-width: 100%;
+  }
+
+  .workspace-report-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-filter-panel {
+    grid-template-columns: 1fr !important;
+  }
+
+  .workspace-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-form-span {
+    grid-column: 1;
+  }
+
+  /* ── Category grid ── */
+  .rc-category-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* ── Summary grid ── */
+  .rc-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* ── Insight grid ── */
+  .insight-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .insight-grid .rc-category-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* ── Charts ── */
+  .weekly-chart-wrap {
+    min-height: 180px;
+  }
+
+  /* ── Modals ── */
+  dialog.workspace-modal {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+  }
+
+  .workspace-modal-card {
+    padding: 18px;
+    border-radius: var(--radius-lg);
+  }
+
+  /* ── Task rows ── */
+  .rc-task-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .rc-task-row time,
+  .rc-task-row .rc-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  /* ── Auth layout ── */
+  .auth-layout-wide {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-panel {
+    display: none;
+  }
+
+  /* ── Hero (landing) ── */
+  .hero-grid {
+    grid-template-columns: 1fr;
+    min-height: unset;
+    padding: 24px 0;
+  }
+}
+
+/* ══════════════════════════════════════════
+   576px — SMALL MOBILE
+   ══════════════════════════════════════════ */
+
+@media (max-width: 576px) {
+  /* Extra compact page padding */
+  .app-main,
+  .main {
+    padding: 12px;
+  }
+
+  .page-stack {
+    gap: 12px;
+  }
+
+  .page-grid {
+    gap: 10px;
+  }
+
+  /* ── Dashboard Hero ── */
+  .dashboard-hero {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .dashboard-hero-copy h1 {
+    font-size: 18px;
+    letter-spacing: -0.02em;
+  }
+
+  /* ── Stat cards: compact horizontal layout ── */
+  .dashboard-stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .dashboard-stat {
+    padding: 14px;
+    min-height: 110px;
+    padding-bottom: 14px; /* no extra space for wave on tiny screens */
+  }
+
+  /* Hide wave on very small screens for cleaner look */
+  .dashboard-stat::after {
+    display: none;
+  }
+
+  .dashboard-stat-top {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .dashboard-stat-top .stat-icon {
+    order: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+
+  .dashboard-stat-top > span {
+    order: 1;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .dashboard-stat > strong {
+    font-size: 26px;
+    letter-spacing: -0.03em;
+  }
+
+  .dashboard-stat > small {
+    font-size: 11px;
+  }
+
+  /* ── Cards ── */
+  .card {
+    padding: 14px;
+  }
+
+  /* ── Dashboard tabs ── */
+  .dashboard-tabs {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .dashboard-tabs a {
+    font-size: 11.5px;
+    min-height: 32px;
+    padding: 0 8px;
+  }
+
+  /* ── Category grid ── */
+  .rc-category-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* ── Summary grid ── */
+  .rc-summary-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* ── Workspace board horizontal scroll ── */
+  .workspace-board {
+    grid-template-columns: minmax(260px, 1fr);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ── Workspace summary ── */
+  .workspace-summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  /* ── Form grid ── */
+  .workspace-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* ── Filter disclosure ── */
+  .filter-disclosure {
+    width: 100%;
+  }
+
+  /* ── Typography ── */
+  h3 { font-size: 15px; }
+  h4 { font-size: 13.5px; }
+
+  /* ── Section header ── */
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* ── Buttons full-width in forms ── */
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .form-actions .primary-button,
+  .form-actions .secondary-button,
+  .form-actions .ghost-button,
+  .form-actions .accent-button {
+    width: 100%;
+  }
+
+  /* ── Navbar: remove title on very small ── */
+  .rc-navbar-title {
+    display: none;
+  }
+
+  /* ── Profile copy: hide on very small ── */
+  .rc-profile-copy {
+    display: none;
+  }
+
+  /* ── Routine items ── */
+  .routine-item {
+    padding: 14px;
+  }
+
+  /* ── Task list ── */
+  .rc-task-row {
+    padding: 11px 12px;
+    gap: 8px;
+  }
+
+  /* ── Workspace tool bar ── */
+  .workspace-filter-panel {
+    padding: 12px;
+  }
+
+  /* ── Modal full-screen ── */
+  dialog.workspace-modal {
+    width: 100vw;
+    max-width: 100%;
+    margin: 0;
+    position: fixed;
+    bottom: 0;
+    top: auto;
+  }
+
+  dialog.workspace-modal::backdrop {
+    background: rgba(0, 0, 0, 0.7);
+  }
+
+  .workspace-modal-card {
+    border-radius: 20px 20px 0 0;
+  }
+}
+
+/* ══════════════════════════════════════════
+   400px — EXTRA SMALL MOBILE
+   ══════════════════════════════════════════ */
+
+@media (max-width: 400px) {
+  /* Stat cards: single column on very small */
+  .dashboard-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-stat {
+    flex-direction: row;
+    align-items: center;
+    padding: 14px;
+    gap: 14px;
+    min-height: 80px;
+  }
+
+  /* Horizontal stat layout: [icon] [text group] */
+  .dashboard-stat-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .dashboard-stat > strong {
+    font-size: 28px;
+  }
+
+  /* Workspace sidebar: hide project list by default on tiny screens */
+  .workspace-projects {
+    display: none;
+  }
+
+  .workspace-projects.visible {
+    display: grid;
+  }
+}
+
+/* ══════════════════════════════════════════
+   WORKSPACE SPECIFIC — all breakpoints
+   ══════════════════════════════════════════ */
+
+/* Workspace main content: prevent overflow */
+.workspace-main {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+/* Workspace table: always scrollable */
+.workspace-table-shell {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* Workspace content header: flex wrap */
+@media (max-width: 992px) {
+  .workspace-content-header {
+    gap: 12px;
+  }
+
+  .workspace-content-header h2 {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 768px) {
+  .workspace-content-header h2 {
+    font-size: 19px;
+  }
+
+  .workspace-list-card-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .workspace-list-card-header h3 {
+    font-size: 14px;
+  }
+
+  /* Workspace topbar: stack */
+  .workspace-topbar {
+    gap: 10px;
+  }
+
+  /* Workspace filter row */
+  .workspace-filter-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .workspace-control,
+  .workspace-date-button {
+    min-width: unset;
+    flex: 1 1 140px;
+  }
+
+  /* Workspace search */
+  .workspace-search-wrap {
+    min-width: unset;
+  }
+}
+
+/* ══════════════════════════════════════════
+   NAVBAR RESPONSIVE IMPROVEMENTS
+   ══════════════════════════════════════════ */
+
+@media (max-width: 1200px) {
+  .rc-global-navbar,
+  .navbar {
+    gap: 10px;
+    padding: 0 18px;
+  }
+}
+
+@media (max-width: 992px) {
+  .rc-global-navbar,
+  .navbar {
+    grid-template-columns: auto minmax(100px, 1fr) 1fr 38px auto minmax(0, 150px);
+    padding: 0 16px;
+    gap: 10px;
+  }
+}
+
+/* ══════════════════════════════════════════
+   LANDING PAGE RESPONSIVE
+   ══════════════════════════════════════════ */
+
+/* If landing page uses lp-hero class from our redesign */
+@media (max-width: 992px) {
+  .lp-hero {
+    grid-template-columns: 1fr !important;
+    min-height: unset;
+    padding: 32px 20px;
+    gap: 24px;
+  }
+
+  .lp-hero-illus {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .lp-header {
+    margin: 8px;
+    padding: 12px 16px;
+    border-radius: 14px;
+  }
+
+  .lp-brand-copy span {
+    display: none;
+  }
+
+  .lp-hero {
+    padding: 24px 14px;
+  }
+
+  .lp-hero-heading {
+    font-size: clamp(26px, 8vw, 36px) !important;
+  }
+
+  .lp-hero-sub {
+    font-size: 14px;
+  }
+
+  .lp-preview-card {
+    border-radius: 16px;
+  }
+
+  .lp-routine-item {
+    padding: 11px 14px;
+  }
+}
+
+@media (max-width: 576px) {
+  .lp-nav {
+    gap: 8px;
+  }
+
+  .lp-login-btn {
+    min-height: 36px;
+    min-width: unset;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .lp-cta-btn {
+    min-height: 36px;
+    min-width: unset;
+    padding: 0 14px;
+    font-size: 13px;
+  }
+
+  .lp-hero-heading {
+    font-size: clamp(24px, 7vw, 30px) !important;
+  }
+
+  .lp-badge {
+    font-size: 11px;
+    min-height: 32px;
+    padding: 0 12px;
+  }
+
+  .lp-feature-card {
+    padding: 12px 14px;
+  }
+}
+
+/* ══════════════════════════════════════════
+   AUTH PAGES RESPONSIVE
+   ══════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .auth-body {
+    padding: 16px;
+  }
+
+  .auth-card,
+  .auth-panel {
+    padding: 20px;
+    border-radius: var(--radius-lg);
+  }
+
+  .auth-form {
+    gap: 14px;
+  }
+}
+
+/* ══════════════════════════════════════════
+   FORM INPUTS — MOBILE IMPROVEMENTS
+   ══════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* Prevent iOS zoom on focus */
+  }
+
+  input,
+  select {
+    min-height: 46px; /* Touch-friendly height */
+  }
+
+  textarea {
+    min-height: 100px;
+  }
+
+  label {
+    font-size: 13px;
+  }
+}
+
+/* ══════════════════════════════════════════
+   SIDEBAR COLLAPSE STATE ON MOBILE
+   ══════════════════════════════════════════ */
+
+@media (max-width: 900px) {
+  /* Override collapsed state on mobile — always show as drawer */
+  body.rc-sidebar-collapsed .rc-global-sidebar {
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+  }
+
+  body.rc-sidebar-collapsed.rc-sidebar-open .rc-global-sidebar {
+    transform: translateX(0);
+  }
+
+  /* Hide the Go Premium section on very small collapsed sidebar */
+  body.rc-sidebar-collapsed .rc-sidebar-premium {
+    display: none;
+  }
+}
+
+/* ══════════════════════════════════════════
+   PRINT — Clean print layout
+   ══════════════════════════════════════════ */
+
+@media print {
+  .sidebar,
+  .rc-global-sidebar,
+  .navbar,
+  .rc-global-navbar,
+  .workspace-loading,
+  .rc-toast-region,
+  .rc-command-menu {
+    display: none !important;
+  }
+
+  body.rc-system {
+    padding: 0 !important;
+  }
+
+  .app-main,
+  .main {
+    padding: 20px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .dashboard-stats-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+
+  .card {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+  }
+}
+
+/* ══════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

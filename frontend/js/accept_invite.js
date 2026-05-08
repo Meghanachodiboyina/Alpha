@@ -2,9 +2,15 @@ const resolveInviteApiBase = () => {
     return "https://routine-creator.onrender.com";
 };
 
+const frontendPath = (relativePath) => {
+    const pathName = window.location.pathname.replace(/\\/g, "/");
+    const rootPrefix = pathName.includes("/pages/") || pathName.includes("/auth/") ? "../" : "";
+    return `${rootPrefix}${relativePath}`;
+};
+
 const inviteMessage = document.getElementById("inviteAcceptMessage");
 const redirectToLogin = (params = {}) => {
-    const url = new URL("login.html", window.location.href);
+    const url = new URL(frontendPath("auth/login.html"), window.location.href);
     url.searchParams.set("from", "invite");
     Object.entries(params).forEach(([key, value]) => {
         if (value) url.searchParams.set(key, value);

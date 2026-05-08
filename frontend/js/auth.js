@@ -7,6 +7,12 @@ const resolveApiBaseUrl = () => {
     return "https://routine-creator.onrender.com";
 };
 
+const frontendPath = (relativePath) => {
+    const pathName = window.location.pathname.replace(/\\/g, "/");
+    const rootPrefix = pathName.includes("/auth/") || pathName.includes("/pages/") ? "../" : "";
+    return `${rootPrefix}${relativePath}`;
+};
+
 const API_BASE_URL = resolveApiBaseUrl();
 const API_FALLBACK_URLS = Array.from(new Set([
     API_BASE_URL,
@@ -81,7 +87,7 @@ if (registerForm) {
     const registerParams = new URLSearchParams(window.location.search);
     const registerFromHome = registerParams.get("from") === "home";
     if (!registerFromHome) {
-        window.location.replace("index.html");
+        window.location.replace(frontendPath("index.html"));
     }
     registerForm.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -105,9 +111,10 @@ const loginForm = document.getElementById("loginForm");
 if (loginForm) {
     const searchParams = new URLSearchParams(window.location.search);
     const fromHome = searchParams.get("from") === "home";
+    const fromInvite = searchParams.get("from") === "invite";
     const isRegisteredFlow = searchParams.get("registered") === "1";
-    if (!fromHome && !isRegisteredFlow) {
-        window.location.replace("index.html");
+    if (!fromHome && !fromInvite && !isRegisteredFlow) {
+        window.location.replace(frontendPath("index.html"));
     }
     const shouldShowReset = sessionStorage.getItem("arc_auth_mode") === "reset" || searchParams.get("reset") === "1";
     showLoginMode(shouldShowReset, { persist: false });
@@ -126,7 +133,7 @@ if (loginForm) {
             saveAuth(data);
             setMessage("loginMessage", "Login successful. Redirecting...");
             window.setTimeout(() => {
-                window.location.href = "dashboard.html";
+                window.location.href = frontendPath("pages/dashboard.html");
             }, 900);
         } catch (error) {
             setMessage("loginMessage", error.message, "error");

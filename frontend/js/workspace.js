@@ -12,11 +12,30 @@ const API_BASE = resolveApiBase();
 const token = localStorage.getItem("arc_token");
 const currentUser = JSON.parse(localStorage.getItem("arc_user") || "null");
 const savedTeamSpaces = JSON.parse(localStorage.getItem("workspace_custom_spaces") || "[]");
-const allowedWorkspaceThemes = ["ocean", "dark", "light"];
+const allowedWorkspaceThemes = ["dark", "light"];
+const frontendPath = (relativePath) => {
+    const pathName = window.location.pathname.replace(/\\/g, "/");
+    const rootPrefix = pathName.includes("/pages/") || pathName.includes("/auth/") ? "../" : "";
+    return `${rootPrefix}${relativePath}`;
+};
+const clearSessionStorage = () => {
+    const theme = localStorage.getItem("arc_theme");
+    const apiBase = localStorage.getItem("arc_api_base");
+    localStorage.clear();
+    if (theme) localStorage.setItem("arc_theme", theme);
+    if (apiBase) localStorage.setItem("arc_api_base", apiBase);
+};
 
 if (!token) {
-    window.location.href = "index.html";
+    window.location.href = frontendPath("index.html");
 }
+
+const getInitialWorkspacePage = () => {
+    const allowedPages = new Set(["home", "calendar", "aiTasks", "reports", "settings", "invites"]);
+    const requestedPage = sessionStorage.getItem("rc_workspace_page") || window.location.hash.replace("#", "");
+    sessionStorage.removeItem("rc_workspace_page");
+    return allowedPages.has(requestedPage) ? requestedPage : "home";
+};
 
 const state = {
     tasks: [],
@@ -30,7 +49,7 @@ const state = {
     activeProject: null,
     activeView: "table",
     timelineRange: "today",
-    activePage: "home",
+    activePage: getInitialWorkspacePage(),
     calendarDate: new Date(),
     filters: {
         search: "",
@@ -77,6 +96,9 @@ const setMessage = (message, type = "success") => {
     const box = $("workspaceMessage");
     box.textContent = message;
     box.className = `form-message ${message ? (type === "error" ? "error-text" : "success-text") : ""}`;
+    if (message && window.rcToast) {
+        window.rcToast(message, type === "error" ? "error" : "success");
+    }
     window.clearTimeout(setMessage.timer);
     if (message) {
         setMessage.timer = window.setTimeout(() => {
@@ -88,12 +110,39 @@ const setMessage = (message, type = "success") => {
 
 const setLoading = (isLoading) => {
     const loader = $("workspaceLoading");
+    const list = $("workspaceListSections");
+    const summary = $("workspaceSummaryStrip");
 
     if (isLoading) {
         loader.style.display = "flex";
+        if (list && !state.tasks.length) {
+            list.innerHTML = `
+                <article class="workspace-list-card">
+                    <header class="workspace-list-card-header">
+                        <div class="workspace-list-card-title"><span></span><strong>Loading workspace</strong></div>
+                        <small>Syncing tasks</small>
+                    </header>
+                    <div class="workspace-skeleton" aria-label="Loading task table">
+                        <span class="workspace-skeleton-row"></span>
+                        <span class="workspace-skeleton-row"></span>
+                        <span class="workspace-skeleton-row"></span>
+                        <span class="workspace-skeleton-row"></span>
+                    </div>
+                </article>
+            `;
+        }
+        if (summary && !state.tasks.length) {
+            summary.innerHTML = `
+                <article class="workspace-summary-card"><span>Total Tasks</span><strong>...</strong><small>Loading</small></article>
+                <article class="workspace-summary-card"><span>In Progress</span><strong>...</strong><small>Loading</small></article>
+                <article class="workspace-summary-card"><span>Completed</span><strong>...</strong><small>Loading</small></article>
+                <article class="workspace-summary-card"><span>Overdue</span><strong>...</strong><small>Loading</small></article>
+            `;
+        }
     } else {
         loader.style.display = "none";
     }
+    refreshIcons();
 };
 
 const getInitials = (name = "") =>
@@ -114,6 +163,34 @@ const formatProjectTitle = (name = "") => {
     if (!value) return "Team Space";
     return value === value.toLowerCase() ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 };
+
+const toSlug = (value = "") => String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+const refreshIcons = () => {
+    if (window.lucide?.createIcons) {
+        window.lucide.createIcons();
+    }
+};
+
+const getSortIcon = (field) => {
+    if (state.filters.sort_by !== field) return "chevrons-up-down";
+    return state.filters.sort_order === "asc" ? "arrow-up" : "arrow-down";
+};
+
+const renderSortHeader = (field, label) => `
+    <button type="button" class="workspace-sort-button" data-sort-field="${field}" aria-label="Sort by ${label}">
+        ${label}
+        <i data-lucide="${getSortIcon(field)}"></i>
+    </button>
+`;
+
+const emptyStateMarkup = (title, detail = "Create a task or adjust filters to bring work into view.") => `
+    <div class="empty-state workspace-empty-state">
+        <span class="workspace-empty-illustration"><i data-lucide="sparkles"></i></span>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(detail)}</small>
+    </div>
+`;
 
 const buildQueryString = () => {
     const params = new URLSearchParams();
@@ -161,7 +238,9 @@ const getProjectCollections = () => {
             const savedProject = projects.find((project) => project.name === name);
             return { id: savedProject?.id || 0, name, color: savedProject?.color || "#1779c6" };
         });
-    const teamSpaces = [{ name: "Team Space", color: "#22c1c3" }, ...serverSpaces, ...storedSpaces];
+    const defaultTeamSpace = { name: "Team Space", color: "#635BFF" };
+    const dedupedServerSpaces = serverSpaces.filter((project) => project.name !== defaultTeamSpace.name);
+    const teamSpaces = [defaultTeamSpace, ...dedupedServerSpaces, ...storedSpaces];
     const spaceNames = new Set(teamSpaces.map((space) => space.name));
     const otherProjects = projects.filter((project) => !spaceNames.has(project.name));
     return { teamSpaces, otherProjects };
@@ -231,36 +310,56 @@ const renderAssignees = () => {
 };
 
 const renderMembers = () => {
-    $("workspaceMemberCountSidebar").textContent = `(${state.members.length})`;
-    $("workspaceSidebarMembers").innerHTML = "";
+    const members = state.members.length
+        ? state.members
+        : [{ name: currentUser?.name || "User", email: currentUser?.email || "", role: "Owner", is_online: true }];
+    $("workspaceMemberCountSidebar").textContent = `(${members.length})`;
+    $("workspaceSidebarMembers").innerHTML = members.slice(0, 5).map((member) => `
+        <article class="workspace-member-sidebar-row">
+            <span class="workspace-member-avatar mini">${escapeHtml(getInitials(member.name))}</span>
+            <span class="workspace-member-sidebar-copy">
+                <strong class="workspace-member-sidebar-name">${escapeHtml(member.name || "User")}</strong>
+                <small>${escapeHtml(member.role || member.email || "Member")}</small>
+            </span>
+            <span class="workspace-member-dot ${member.is_online ? "online" : "offline"}" aria-label="${member.is_online ? "Online" : "Offline"}"></span>
+        </article>
+    `).join("");
 };
 
 const renderTaskRow = (task) => `
         <tr>
             <td class="workspace-task-cell">
-                <strong>${escapeHtml(task.title)}</strong>
+                <strong class="workspace-task-title-edit" contenteditable="true" role="textbox" aria-label="Edit task title" data-inline-title-task-id="${task.id}">${escapeHtml(task.title)}</strong>
                 <small>${escapeHtml(task.description || task.project_name)}</small>
             </td>
             <td>
-                <div class="workspace-assignee-cell">
+                <div class="ws-assignee-trigger workspace-assignee-cell"
+                    data-assignee-task-id="${task.id}"
+                    data-current-assignee="${escapeHtml(task.assignee || "")}"
+                    role="button"
+                    tabindex="0"
+                    title="Change assignee">
                     <span class="workspace-member-avatar mini">${escapeHtml(getInitials(task.assignee))}</span>
-                    <span>${escapeHtml(task.assignee)}</span>
+                    <span>${escapeHtml(task.assignee || "Unassigned")}</span>
                 </div>
             </td>
             <td><span class="workspace-badge priority-${task.priority.toLowerCase()}">${escapeHtml(task.priority)}</span></td>
             <td>${formatDate(task.due_date)}</td>
             <td>
-                <select class="workspace-control workspace-inline-select" data-status-task-id="${task.id}">
-                    <option value="Todo" ${task.status === "Todo" ? "selected" : ""}>Todo</option>
-                    <option value="In Progress" ${task.status === "In Progress" ? "selected" : ""}>In Progress</option>
-                    <option value="Completed" ${task.status === "Completed" ? "selected" : ""}>Completed</option>
-                </select>
+                <button type="button"
+                    class="ws-status-pill status-${toSlug(task.status)}"
+                    data-status-task-id="${task.id}"
+                    aria-label="Change status for ${escapeHtml(task.title)}"
+                    aria-haspopup="true">
+                    <span class="ws-status-dot ws-dot-${toSlug(task.status)}"></span>
+                    ${escapeHtml(task.status)}
+                </button>
             </td>
             <td>
                 <div class="workspace-action-icons">
-                    <button type="button" class="ghost-button workspace-edit" data-task-id="${task.id}">Edit</button>
-                    <button type="button" class="ghost-button workspace-complete" data-task-id="${task.id}">Done</button>
-                    <button type="button" class="ghost-button workspace-delete" data-task-id="${task.id}">Delete</button>
+                    <button type="button" class="ghost-button workspace-edit" data-task-id="${task.id}" title="Edit task"><i data-lucide="pencil"></i><span>Edit</span></button>
+                    <button type="button" class="ghost-button workspace-complete" data-task-id="${task.id}" title="Mark complete"><i data-lucide="check"></i><span>Done</span></button>
+                    <button type="button" class="ghost-button workspace-delete" data-task-id="${task.id}" title="Delete task"><i data-lucide="trash-2"></i><span>Delete</span></button>
                 </div>
             </td>
         </tr>
@@ -271,25 +370,29 @@ const renderTaskSection = (project, type) => {
     return `
         <article class="workspace-list-card">
             <header class="workspace-list-card-header">
-                <div>
+                <div class="workspace-list-card-title">
+                    <span aria-hidden="true"></span>
                     <strong>${escapeHtml(formatProjectTitle(project.name))}</strong>
                 </div>
-                <small>${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}</small>
+                <div class="workspace-list-meta">
+                    <small>${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}</small>
+                    <small>${escapeHtml(type === "space" ? "Space" : "Project")}</small>
+                </div>
             </header>
             <div class="workspace-table-shell">
                 <table class="workspace-table workspace-table-v2">
                     <thead>
                         <tr>
-                            <th>Task Name</th>
-                            <th>Assignee</th>
-                            <th>Priority</th>
-                            <th>Due Date</th>
-                            <th>Status</th>
+                            <th>${renderSortHeader("title", "Task Name")}</th>
+                            <th>${renderSortHeader("assignee", "Assignee")}</th>
+                            <th>${renderSortHeader("priority", "Priority")}</th>
+                            <th>${renderSortHeader("due_date", "Due Date")}</th>
+                            <th>${renderSortHeader("status", "Status")}</th>
                             <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${tasks.length ? tasks.map(renderTaskRow).join("") : `<tr><td colspan="6"><div class="empty-state">No tasks found for this ${type}.</div></td></tr>`}
+                        ${tasks.length ? tasks.map(renderTaskRow).join("") : `<tr><td colspan="6">${emptyStateMarkup(`No tasks in this ${type}.`, "Add a task or generate work with AI to get started.")}</td></tr>`}
                     </tbody>
                 </table>
             </div>
@@ -301,7 +404,8 @@ const renderTable = () => {
     const { teamSpaces, otherProjects } = getProjectCollections();
     const allProjects = [...teamSpaces, ...otherProjects];
     if (!allProjects.length) {
-        $("workspaceListSections").innerHTML = `<div class="empty-state">No spaces or projects found.</div>`;
+        $("workspaceListSections").innerHTML = emptyStateMarkup("No spaces or projects found.", "Create a team space or project from the sidebar.");
+        refreshIcons();
         return;
     }
     const visibleProjects = state.activeProject
@@ -311,6 +415,7 @@ const renderTable = () => {
         const type = teamSpaces.some((item) => item.name === project.name) ? "space" : "project";
         return renderTaskSection(project, type);
     }).join("");
+    refreshIcons();
 };
 
 const createBoardCard = (task) => {
@@ -539,7 +644,7 @@ const renderAITasks = () => {
             <article class="workspace-report-card workspace-ai-task-card">
                 <span>${escapeHtml(task.project_name)}</span>
                 <strong>${escapeHtml(task.title)}</strong>
-                <small>${escapeHtml(task.assignee)} • ${escapeHtml(task.status)} • ${formatDate(task.due_date)}</small>
+                <small>${escapeHtml(task.assignee)} &middot; ${escapeHtml(task.status)} &middot; ${formatDate(task.due_date)}</small>
                 <button type="button" class="ghost-button" data-task-id="${task.id}">Open Task</button>
             </article>
         `).join("")
@@ -564,7 +669,7 @@ const getAITaskEstimate = (task) => {
 const renderAITaskGroups = () => {
     const groups = getProjectAITaskGroups();
     const totalTasks = groups.reduce((sum, group) => sum + (group.tasks?.length || 0), 0);
-    $("workspaceAITaskSummary").textContent = groups.length ? `${groups.length} AI groups • ${totalTasks} tasks` : "Generate tasks with AI";
+    $("workspaceAITaskSummary").textContent = groups.length ? `${groups.length} AI groups - ${totalTasks} tasks` : "Generate tasks with AI";
     $("workspaceAITasks").innerHTML = groups.length
         ? groups.map((group) => `
             <article class="workspace-ai-group-card">
@@ -648,7 +753,7 @@ const renderReports = () => {
             <article class="workspace-invite-row">
                 <div>
                     <strong>${escapeHtml(member.name)}</strong>
-                    <small>${member.assigned_tasks} assigned • ${member.completed_tasks} completed</small>
+                    <small>${member.assigned_tasks} assigned &middot; ${member.completed_tasks} completed</small>
                 </div>
                 <span class="workspace-badge">${member.completion_rate}%</span>
             </article>
@@ -667,7 +772,7 @@ const renderInvites = () => {
             <article class="workspace-invite-row">
                 <div>
                     <strong>${escapeHtml(invite.invitee_email)}</strong>
-                    <small>${escapeHtml(invite.role || "Member")} • ${escapeHtml(invite.status)}${invite.created_at ? ` • ${new Date(invite.created_at).toLocaleDateString()}` : ""}</small>
+                    <small>${escapeHtml(invite.role || "Member")} &middot; ${escapeHtml(invite.status)}${invite.created_at ? ` &middot; ${new Date(invite.created_at).toLocaleDateString()}` : ""}</small>
                 </div>
                 <span class="workspace-badge">${escapeHtml(invite.status)}</span>
             </article>
@@ -679,15 +784,16 @@ const renderInvites = () => {
 };
 
 const renderSettings = () => {
+    const globalTheme = window.arcTheme?.get?.() || (document.documentElement.classList.contains("dark") ? "dark" : "light");
     const settings = state.settings || {
         workspace_name: "Team Space",
-        theme: "ocean",
+        theme: globalTheme,
         notifications_enabled: true,
         email_notifications_enabled: true,
     };
 
     $("workspaceNameInput").value = settings.workspace_name || "Team Space";
-    const theme = allowedWorkspaceThemes.includes(settings.theme) ? settings.theme : "ocean";
+    const theme = allowedWorkspaceThemes.includes(globalTheme) ? globalTheme : "light";
     $("workspaceSettingsAccountName").textContent = currentUser?.name || "User";
     $("workspaceSettingsAccountEmail").textContent = currentUser?.email || "No email available";
     $("workspaceNotificationsInput").checked = Boolean(settings.notifications_enabled);
@@ -721,30 +827,50 @@ const renderPages = () => {
             reports: "Reports",
         }[state.activePage])
         : state.activeProject ? formatProjectTitle(state.activeProject) : "Workspace";
-    const showViewSwitch = ["home", "calendar"].includes(state.activePage);
+    const showViewSwitch = state.activePage === "home";
     document.querySelector(".workspace-view-switch").hidden = !showViewSwitch;
+    document.querySelector(".workspace-view-command-bar")?.toggleAttribute("hidden", !showViewSwitch);
+    if (!showViewSwitch) {
+        const filterPanel = $("workspaceFilterPanel");
+        filterPanel.hidden = true;
+        $("workspaceFilterToggle")?.setAttribute("aria-expanded", "false");
+    }
     document.body.classList.toggle("workspace-focus-tool", state.activePage !== "home");
+    $("workspaceSummaryStrip").hidden = state.activePage !== "home";
 };
 
 const renderViews = () => {
     const panelMap = {
-        table: "workspaceTableView",
-        board: "workspaceBoardView",
-        timeline: "workspaceTimelineView",
+        table: "list-view",
+        board: "board-view",
+        timeline: "timeline-view",
     };
-    document.querySelectorAll(".workspace-view-panel").forEach((panel) => {
-        panel.hidden = panel.id !== panelMap[state.activeView];
+    const activePanelId = panelMap[state.activeView] || panelMap.table;
+    document.querySelectorAll(".view-container").forEach((panel) => {
+        const isActive = panel.id === activePanelId;
+        panel.hidden = !isActive;
+        panel.style.display = isActive ? "" : "none";
     });
-    document.querySelectorAll("[data-workspace-view]").forEach((button) => {
-        button.classList.toggle("active", state.activePage === "home" && button.dataset.workspaceView === state.activeView);
+    document.querySelectorAll(".workspace-view-button[data-view]").forEach((button) => {
+        const internalView = button.dataset.view === "list" ? "table" : button.dataset.view;
+        button.classList.toggle("active", state.activePage === "home" && internalView === state.activeView);
     });
 };
 
 const renderFilterActiveStates = () => {
+    const hasAdvancedFilters = Boolean(
+        state.filters.status ||
+        state.filters.assignee ||
+        state.filters.priority ||
+        state.filters.due_date ||
+        state.filters.sort_by !== "due_date" ||
+        state.filters.sort_order !== "asc"
+    );
     const filterState = {
         workspaceSearchWrap: Boolean(state.filters.search),
+        workspaceFilterToggle: hasAdvancedFilters,
         workspaceFilterSelect: Boolean(state.filters.status),
-        workspaceSortSelect: false,
+        workspaceSortSelect: state.filters.sort_by !== "due_date" || state.filters.sort_order !== "asc",
         workspaceAssigneeSelect: Boolean(state.filters.assignee),
         workspacePrioritySelect: Boolean(state.filters.priority),
         workspaceDateFilterButton: Boolean(state.filters.due_date),
@@ -754,10 +880,43 @@ const renderFilterActiveStates = () => {
     });
 };
 
+const renderWorkspaceSummary = () => {
+    const tasks = getVisibleTasks();
+    const completed = tasks.filter((task) => task.status === "Completed").length;
+    const inProgress = tasks.filter((task) => task.status === "In Progress").length;
+    const overdue = tasks.filter((task) => task.status !== "Completed" && task.due_date && new Date(`${task.due_date}T00:00:00`) < new Date()).length;
+    const productivity = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
+    const scopeLabel = state.activeProject ? formatProjectTitle(state.activeProject) : "All spaces";
+
+    $("workspaceSummaryStrip").innerHTML = `
+        <article class="workspace-summary-card">
+            <span>Total Tasks</span>
+            <strong>${tasks.length}</strong>
+            <small>${escapeHtml(scopeLabel)}</small>
+        </article>
+        <article class="workspace-summary-card">
+            <span>In Progress</span>
+            <strong>${inProgress}</strong>
+            <small>Active execution</small>
+        </article>
+        <article class="workspace-summary-card">
+            <span>Completed</span>
+            <strong>${completed}</strong>
+            <small>${productivity}% completion</small>
+        </article>
+        <article class="workspace-summary-card">
+            <span>Overdue</span>
+            <strong>${overdue}</strong>
+            <small>${overdue ? "Needs attention" : "Clear for now"}</small>
+        </article>
+    `;
+};
+
 const renderAll = () => {
     renderProjects();
     renderAssignees();
     renderMembers();
+    renderWorkspaceSummary();
     renderTable();
     renderBoard();
     renderTimeline();
@@ -770,6 +929,7 @@ const renderAll = () => {
     renderViews();
     renderPages();
     renderFilterActiveStates();
+    refreshIcons();
 };
 
 const loadWorkspace = async () => {
@@ -911,6 +1071,22 @@ const deleteTask = async (taskId) => {
 };
 
 const handleTableActions = async (event) => {
+    const sortButton = event.target.closest("[data-sort-field]");
+    if (sortButton) {
+        const field = sortButton.dataset.sortField;
+        const nextOrder = state.filters.sort_by === field && state.filters.sort_order === "asc" ? "desc" : "asc";
+        state.filters.sort_by = field;
+        state.filters.sort_order = nextOrder;
+        const sortSelect = $("workspaceSortSelect");
+        const value = `${field}:${nextOrder}`;
+        if ([...sortSelect.options].some((option) => option.value === value)) {
+            sortSelect.value = value;
+        }
+        renderFilterActiveStates();
+        await loadWorkspace();
+        return;
+    }
+
     const actionButton = event.target.closest("[data-task-id]");
     if (actionButton) {
         const taskId = Number(actionButton.dataset.taskId);
@@ -930,11 +1106,52 @@ const handleTableActions = async (event) => {
         }
     }
 
-    const statusSelect = event.target.closest("[data-status-task-id]");
-    if (statusSelect) {
-        const taskId = Number(statusSelect.dataset.statusTaskId);
-        const status = statusSelect.value;
-        await updateTask(taskId, { status, progress: status === "Completed" ? 100 : undefined }, "Task status updated.");
+    const statusPill = event.target.closest(".ws-status-pill[data-status-task-id]");
+    if (statusPill) {
+        const taskId = Number(statusPill.dataset.statusTaskId);
+        const task = state.tasks.find((t) => t.id === taskId);
+        if (task) openStatusDropdown(statusPill, taskId, task.status);
+        return;
+    }
+
+    const assigneeTrigger = event.target.closest(".ws-assignee-trigger[data-assignee-task-id]");
+    if (assigneeTrigger) {
+        const taskId = Number(assigneeTrigger.dataset.assigneeTaskId);
+        openAssigneeDropdown(assigneeTrigger, taskId, assigneeTrigger.dataset.currentAssignee || "");
+        return;
+    }
+};
+
+const handleInlineTitleFocus = (event) => {
+    const title = event.target.closest("[data-inline-title-task-id]");
+    if (!title) return;
+    title.dataset.originalTitle = title.textContent.trim();
+};
+
+const handleInlineTitleBlur = async (event) => {
+    const title = event.target.closest("[data-inline-title-task-id]");
+    if (!title) return;
+    const taskId = Number(title.dataset.inlineTitleTaskId);
+    const nextTitle = title.textContent.trim();
+    const previousTitle = title.dataset.originalTitle || "";
+    if (!taskId || !nextTitle || nextTitle === previousTitle) {
+        if (!nextTitle) title.textContent = previousTitle;
+        return;
+    }
+    await updateTask(taskId, { title: nextTitle }, "Task title updated.");
+};
+
+const handleInlineTitleKeydown = (event) => {
+    const title = event.target.closest("[data-inline-title-task-id]");
+    if (!title) return;
+    if (event.key === "Enter") {
+        event.preventDefault();
+        title.blur();
+    }
+    if (event.key === "Escape") {
+        event.preventDefault();
+        title.textContent = title.dataset.originalTitle || title.textContent;
+        title.blur();
     }
 };
 
@@ -1127,7 +1344,7 @@ const saveSettings = async (event) => {
             headers: authHeaders(),
             body: JSON.stringify({
                 workspace_name: $("workspaceNameInput").value.trim(),
-                theme: state.settings?.theme || "ocean",
+                theme: window.arcTheme?.get?.() || (document.documentElement.classList.contains("dark") ? "dark" : "light"),
                 notifications_enabled: $("workspaceNotificationsInput").checked,
                 email_notifications_enabled: $("workspaceEmailNotificationsInput").checked,
                 permission_mode: state.settings?.permission_mode || "members_edit",
@@ -1160,6 +1377,179 @@ const applyFilters = () => {
     renderFilterActiveStates();
     loadWorkspace();
 };
+
+// ── Custom Dropdown System ──────────────────────────────────────────────────
+const WS_DD = { active: null, taskId: null };
+
+const closeDropdowns = () => {
+    const sd = document.getElementById("wsStatusDropdown");
+    const ad = document.getElementById("wsAssigneeDropdown");
+    if (sd) sd.style.display = "none";
+    if (ad) ad.style.display = "none";
+    WS_DD.active = null;
+    WS_DD.taskId = null;
+};
+
+const positionDropdown = (el, trigger) => {
+    const r = trigger.getBoundingClientRect();
+    el.style.top = `${r.bottom + 6}px`;
+    el.style.left = `${r.left}px`;
+    requestAnimationFrame(() => {
+        const er = el.getBoundingClientRect();
+        if (er.right > window.innerWidth - 8) {
+            el.style.left = `${Math.max(8, window.innerWidth - er.width - 8)}px`;
+        }
+        if (er.bottom > window.innerHeight - 8) {
+            el.style.top = `${Math.max(8, r.top - er.height - 6)}px`;
+        }
+    });
+};
+
+const openStatusDropdown = (trigger, taskId, currentStatus) => {
+    closeDropdowns();
+    const dropdown = document.getElementById("wsStatusDropdown");
+    dropdown.querySelectorAll("[data-ws-status]").forEach((btn) => {
+        const isActive = btn.dataset.wsStatus === currentStatus;
+        btn.classList.toggle("active", isActive);
+        const check = btn.querySelector(".ws-check");
+        if (check) check.style.opacity = isActive ? "1" : "0";
+    });
+    dropdown.style.display = "block";
+    positionDropdown(dropdown, trigger);
+    WS_DD.active = dropdown;
+    WS_DD.taskId = taskId;
+};
+
+const openAssigneeDropdown = (trigger, taskId, currentAssignee) => {
+    closeDropdowns();
+    const dropdown = document.getElementById("wsAssigneeDropdown");
+    const members = state.members.length
+        ? state.members
+        : [{ name: currentUser?.name || "User", email: currentUser?.email || "", is_online: true }];
+    const list = document.getElementById("wsAssigneeMemberList");
+    list.innerHTML = members.map((member) => `
+        <button type="button" class="ws-popover-option ${member.name === currentAssignee ? "active" : ""}" data-ws-assignee="${escapeHtml(member.name)}">
+            <span class="ws-avatar mini">${escapeHtml(getInitials(member.name))}</span>
+            <span class="ws-assignee-info">
+                <strong>${escapeHtml(member.name)}</strong>
+                <small>${escapeHtml(member.email || member.role || "Member")}</small>
+            </span>
+            <span class="ws-online-dot ${member.is_online ? "online" : ""}"></span>
+        </button>
+    `).join("");
+    const search = document.getElementById("wsAssigneeSearch");
+    if (search) {
+        search.value = "";
+        list.querySelectorAll("[data-ws-assignee]").forEach((btn) => (btn.style.display = ""));
+    }
+    const meBtn = dropdown.querySelector(".ws-assign-me .ws-avatar");
+    if (meBtn) meBtn.textContent = getInitials(currentUser?.name || "U");
+    dropdown.style.display = "flex";
+    positionDropdown(dropdown, trigger);
+    WS_DD.active = dropdown;
+    WS_DD.taskId = taskId;
+    window.setTimeout(() => search?.focus(), 50);
+};
+
+// Create status dropdown singleton
+(() => {
+    const el = document.createElement("div");
+    el.id = "wsStatusDropdown";
+    el.className = "ws-popover";
+    el.style.display = "none";
+    el.innerHTML = `
+        <div class="ws-popover-section">
+            <p class="ws-popover-section-label">Not Started</p>
+            <button type="button" class="ws-popover-option" data-ws-status="Todo">
+                <span class="ws-status-dot ws-dot-todo"></span>
+                <span>Todo</span>
+                <i data-lucide="check" class="ws-check" style="opacity:0"></i>
+            </button>
+        </div>
+        <div class="ws-popover-divider"></div>
+        <div class="ws-popover-section">
+            <p class="ws-popover-section-label">Active</p>
+            <button type="button" class="ws-popover-option" data-ws-status="In Progress">
+                <span class="ws-status-dot ws-dot-in-progress"></span>
+                <span>In Progress</span>
+                <i data-lucide="check" class="ws-check" style="opacity:0"></i>
+            </button>
+        </div>
+        <div class="ws-popover-divider"></div>
+        <div class="ws-popover-section">
+            <p class="ws-popover-section-label">Done</p>
+            <button type="button" class="ws-popover-option" data-ws-status="Completed">
+                <span class="ws-status-dot ws-dot-completed"></span>
+                <span>Completed</span>
+                <i data-lucide="check" class="ws-check" style="opacity:0"></i>
+            </button>
+        </div>
+    `;
+    el.addEventListener("click", async (event) => {
+        const option = event.target.closest("[data-ws-status]");
+        if (!option) return;
+        const status = option.dataset.wsStatus;
+        const taskId = WS_DD.taskId;
+        closeDropdowns();
+        if (taskId) {
+            await updateTask(taskId, { status, progress: status === "Completed" ? 100 : undefined }, "Status updated.");
+        }
+    });
+    document.body.appendChild(el);
+})();
+
+// Create assignee dropdown singleton
+(() => {
+    const el = document.createElement("div");
+    el.id = "wsAssigneeDropdown";
+    el.className = "ws-popover ws-assignee-popover";
+    el.style.display = "none";
+    el.innerHTML = `
+        <div class="ws-popover-search-wrap">
+            <input type="search" id="wsAssigneeSearch" class="ws-popover-search" placeholder="Search members...">
+        </div>
+        <div class="ws-popover-section">
+            <button type="button" class="ws-popover-option ws-assign-me" data-ws-assignee="__me__">
+                <span class="ws-avatar mini ws-avatar-me">${escapeHtml(getInitials(currentUser?.name || "U"))}</span>
+                <span>Assign to me</span>
+            </button>
+        </div>
+        <div class="ws-popover-divider"></div>
+        <div id="wsAssigneeMemberList" class="ws-assignee-member-list"></div>
+    `;
+    el.querySelector("#wsAssigneeSearch")?.addEventListener("input", (e) => {
+        const query = e.target.value.trim().toLowerCase();
+        el.querySelectorAll("#wsAssigneeMemberList [data-ws-assignee]").forEach((btn) => {
+            btn.style.display = query && !btn.textContent.toLowerCase().includes(query) ? "none" : "";
+        });
+    });
+    el.addEventListener("click", async (event) => {
+        const option = event.target.closest("[data-ws-assignee]");
+        if (!option) return;
+        let assignee = option.dataset.wsAssignee;
+        if (assignee === "__me__") assignee = currentUser?.name || "User";
+        const taskId = WS_DD.taskId;
+        closeDropdowns();
+        if (taskId) {
+            await updateTask(taskId, { assignee }, "Assignee updated.");
+        }
+    });
+    document.body.appendChild(el);
+})();
+
+// Close dropdowns on outside click or Escape
+document.addEventListener("click", (event) => {
+    if (WS_DD.active &&
+        !event.target.closest(".ws-popover") &&
+        !event.target.closest(".ws-status-pill") &&
+        !event.target.closest(".ws-assignee-trigger")) {
+        closeDropdowns();
+    }
+});
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && WS_DD.active) closeDropdowns();
+});
+// ── End Custom Dropdown System ──────────────────────────────────────────────
 
 $("workspaceUserAvatar").textContent = getInitials(currentUser?.name || "User");
 $("workspaceProfileAvatar").textContent = getInitials(currentUser?.name || "User");
@@ -1209,7 +1599,9 @@ $("workspaceAIForm").addEventListener("submit", handleAIGenerate);
 $("workspaceInviteForm").addEventListener("submit", handleInviteSubmit);
 $("workspaceSettingsForm").addEventListener("submit", saveSettings);
 $("workspaceListSections").addEventListener("click", handleTableActions);
-$("workspaceListSections").addEventListener("change", handleTableActions);
+$("workspaceListSections").addEventListener("focusin", handleInlineTitleFocus);
+$("workspaceListSections").addEventListener("focusout", handleInlineTitleBlur);
+$("workspaceListSections").addEventListener("keydown", handleInlineTitleKeydown);
 $("workspaceCalendarGrid").addEventListener("click", (event) => {
     const button = event.target.closest("[data-task-id]");
     if (!button) return;
@@ -1258,16 +1650,16 @@ $("workspaceCalendarNext").addEventListener("click", () => {
     renderCalendar();
 });
 $("workspaceLogoutButton").addEventListener("click", () => {
-    localStorage.clear();
-    window.location.href = "index.html";
+    clearSessionStorage();
+    window.location.href = frontendPath("index.html");
 });
 $("workspaceProfileLogoutButton").addEventListener("click", () => {
-    localStorage.clear();
-    window.location.href = "index.html";
+    clearSessionStorage();
+    window.location.href = frontendPath("index.html");
 });
 $("workspaceSettingsLogoutButton").addEventListener("click", () => {
-    localStorage.clear();
-    window.location.href = "index.html";
+    clearSessionStorage();
+    window.location.href = frontendPath("index.html");
 });
 $("workspaceUserAvatar").addEventListener("click", (event) => {
     event.stopPropagation();
@@ -1297,6 +1689,11 @@ $("workspaceDateFilterButton").addEventListener("click", () => {
         input.click();
     }
 });
+$("workspaceFilterToggle")?.addEventListener("click", () => {
+    const panel = $("workspaceFilterPanel");
+    panel.hidden = !panel.hidden;
+    $("workspaceFilterToggle").setAttribute("aria-expanded", String(!panel.hidden));
+});
 $("workspaceSearchToggle").addEventListener("click", () => {
     $("workspaceSearchWrap").classList.toggle("collapsed");
     if (!$("workspaceSearchWrap").classList.contains("collapsed")) {
@@ -1311,9 +1708,10 @@ $("workspaceSearchInput").addEventListener("blur", () => {
         $("workspaceSearchWrap").classList.add("collapsed");
     }
 });
-document.querySelectorAll("[data-workspace-view]").forEach((button) => {
+document.querySelectorAll(".workspace-view-button[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
-        state.activeView = button.dataset.workspaceView;
+        const selectedView = button.dataset.view || "list";
+        state.activeView = selectedView === "list" ? "table" : selectedView;
         setActivePage("home");
         renderViews();
         renderPages();

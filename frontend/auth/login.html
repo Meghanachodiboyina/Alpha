@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | Routine Creator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="../js/theme.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+        };
+    </script>
+    <style type="text/tailwindcss">
+        @layer base {
+            :root {
+                color-scheme: light;
+            }
+
+            .dark {
+                color-scheme: dark;
+            }
+
+            html,
+            body {
+                min-height: 100%;
+                font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+
+            body {
+                margin: 0;
+            }
+
+            button,
+            input {
+                font: inherit;
+            }
+        }
+
+        @layer utilities {
+            .auth-radial-bg {
+                background:
+                    radial-gradient(circle at 16% 18%, rgba(168, 85, 247, 0.20), transparent 28rem),
+                    radial-gradient(circle at 82% 8%, rgba(59, 130, 246, 0.18), transparent 30rem),
+                    radial-gradient(circle at 50% 96%, rgba(20, 184, 166, 0.16), transparent 26rem),
+                    linear-gradient(135deg, #fbfaff 0%, #eef6ff 44%, #f8fbff 100%);
+            }
+
+            .dark .auth-radial-bg {
+                background:
+                    radial-gradient(circle at 16% 18%, rgba(168, 85, 247, 0.20), transparent 28rem),
+                    radial-gradient(circle at 82% 8%, rgba(59, 130, 246, 0.18), transparent 30rem),
+                    radial-gradient(circle at 50% 96%, rgba(20, 184, 166, 0.14), transparent 26rem),
+                    linear-gradient(135deg, #090a14 0%, #101427 48%, #080a12 100%);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <noscript>
+        <main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Inter,system-ui,sans-serif;">
+            <p>JavaScript is required to sign in to Routine Creator.</p>
+        </main>
+    </noscript>
+
+    <script type="module">
+        import React, { useMemo, useState } from "https://esm.sh/react@18.2.0";
+        import { createRoot } from "https://esm.sh/react-dom@18.2.0/client";
+        import { html } from "https://esm.sh/htm@3.1.1/react?deps=react@18.2.0";
+        import { AnimatePresence, motion, useReducedMotion } from "https://esm.sh/framer-motion@10.18.0?deps=react@18.2.0,react-dom@18.2.0";
+        import {
+            ArrowRight,
+            CheckCircle2,
+            Chrome,
+            Eye,
+            EyeOff,
+            Github,
+            HelpCircle,
+            Loader2,
+            LockKeyhole,
+            Mail,
+            ShieldCheck,
+            Sparkles,
+        } from "https://esm.sh/lucide-react@0.468.0?deps=react@18.2.0";
+
+        const cn = (...classes) => classes.filter(Boolean).join(" ");
+
+        const resolveApiBaseUrl = () => {
+            const saved = localStorage.getItem("arc_api_base");
+            if (saved) return saved;
+            return "https://routine-creator.onrender.com";
+        };
+
+        const frontendPath = (relativePath) => {
+            const pathName = window.location.pathname.replace(/\\/g, "/");
+            const rootPrefix = pathName.includes("/auth/") || pathName.includes("/pages/") ? "../" : "";
+            return `${rootPrefix}${relativePath}`;
+        };
+
+        const API_BASE_URL = resolveApiBaseUrl();
+        const API_FALLBACK_URLS = Array.from(new Set([
+            API_BASE_URL,
+            "https://routine-creator.onrender.com",
+        ]));
+
+        const postJson = async (path, payload) => {
+            let lastNetworkError = null;
+            for (const baseUrl of API_FALLBACK_URLS) {
+                try {
+                    const response = await fetch(`${baseUrl}${path}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(data.detail || data.message || "Something went wrong.");
+                    }
+                    localStorage.setItem("arc_api_base", baseUrl);
+                    return data;
+                } catch (error) {
+                    if (error instanceof TypeError) {
+                        lastNetworkError = error;
+                        continue;
+                    }
+                    throw error;
+                }
+            }
+            throw lastNetworkError || new Error(`Could not connect to the backend API at ${API_BASE_URL}.`);
+        };
+
+        const saveAuth = (data) => {
+            localStorage.setItem("arc_token", data.access_token);
+            localStorage.setItem("arc_user", JSON.stringify(data.user));
+        };
+
+        const Button = ({ variant = "default", className, loading = false, children, ...props }) => {
+            const variants = {
+                default:
+                    "bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-500/20 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-500/25 dark:shadow-indigo-950/30",
+                secondary:
+                    "border border-neutral-200 bg-white/75 text-neutral-800 hover:-translate-y-0.5 hover:border-neutral-300 hover:bg-white hover:shadow-md dark:border-white/10 dark:bg-white/[0.07] dark:text-neutral-100 dark:hover:border-white/[0.18] dark:hover:bg-white/[0.10]",
+                ghost:
+                    "text-neutral-600 hover:text-neutral-950 dark:text-neutral-400 dark:hover:text-white",
+                icon:
+                    "border border-neutral-200 bg-white/[0.65] text-neutral-700 hover:-translate-y-0.5 hover:bg-white hover:shadow-md dark:border-white/10 dark:bg-white/[0.07] dark:text-neutral-200 dark:hover:bg-white/[0.10]",
+            };
+            return html`
+                <button
+                    ...${props}
+                    disabled=${props.disabled || loading}
+                    className=${cn(
+                        "inline-flex h-12 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:pointer-events-none disabled:opacity-60 dark:focus-visible:ring-offset-neutral-950",
+                        variants[variant],
+                        className,
+                    )}
+                >
+                    ${loading && html`<${Loader2} className="h-4 w-4 animate-spin" aria-hidden="true" />`}
+                    ${children}
+                </button>
+            `;
+        };
+
+        const Field = ({ id, label, icon: Icon, error, children }) => html`
+            <div className="space-y-2">
+                <label htmlFor=${id} className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+                    ${label}
+                </label>
+                <div className=${cn(
+                    "group relative flex h-12 items-center rounded-lg border bg-white/[0.72] transition-all duration-200 dark:bg-white/[0.06]",
+                    error
+                        ? "border-rose-300 shadow-[0_0_0_4px_rgba(244,63,94,0.10)] dark:border-rose-500/60"
+                        : "border-neutral-200 focus-within:border-indigo-400 focus-within:shadow-[0_0_0_4px_rgba(99,102,241,0.13)] dark:border-white/10 dark:focus-within:border-indigo-400/80",
+                )}>
+                    <${Icon} className="ml-3 h-4 w-4 shrink-0 text-neutral-400 transition-colors group-focus-within:text-indigo-500" aria-hidden="true" />
+                    ${children}
+                </div>
+                ${error && html`<p id=${`${id}-error`} className="text-sm font-medium text-rose-600 dark:text-rose-300">${error}</p>`}
+            </div>
+        `;
+
+        const inputClasses = "h-full min-w-0 flex-1 border-0 bg-transparent px-3 text-sm font-medium text-neutral-950 outline-none placeholder:text-neutral-400 focus:ring-0 dark:text-white dark:placeholder:text-neutral-500";
+
+        const AuthInput = ({ id, error, className, ...props }) => html`
+            <input
+                ...${props}
+                id=${id}
+                aria-invalid=${Boolean(error)}
+                aria-describedby=${error ? `${id}-error` : undefined}
+                className=${cn(inputClasses, className)}
+            />
+        `;
+
+        const AuthMessage = ({ message }) => {
+            if (!message.text) return null;
+            const isError = message.type === "error";
+            return html`
+                <div
+                    role=${isError ? "alert" : "status"}
+                    className=${cn(
+                        "rounded-lg border px-3 py-2 text-sm font-medium",
+                        isError
+                            ? "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200",
+                    )}
+                >
+                    ${message.text}
+                </div>
+            `;
+        };
+
+        const Logo = () => html`
+            <div className="flex flex-col items-center gap-3 text-center">
+                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-600 via-indigo-600 to-sky-500 text-white shadow-lg shadow-indigo-500/25">
+                    <${Sparkles} className="h-6 w-6" aria-hidden="true" />
+                </div>
+                <div>
+                    <p className="text-sm font-extrabold tracking-normal text-neutral-950 dark:text-white">Routine Creator</p>
+                    <p className="text-xs font-semibold text-neutral-500 dark:text-neutral-400">Enterprise planning workspace</p>
+                </div>
+            </div>
+        `;
+
+        const SocialButton = ({ provider, icon: Icon, onClick }) => html`
+            <${Button}
+                type="button"
+                variant="secondary"
+                onClick=${onClick}
+                className="w-full justify-center"
+            >
+                <${Icon} className="h-4 w-4" aria-hidden="true" />
+                <span>Continue with ${provider}</span>
+            <//>
+        `;
+
+        const LoginForm = ({
+            email,
+            errors,
+            isLoading,
+            message,
+            password,
+            setEmail,
+            setMessage,
+            setMode,
+            setPassword,
+            showPassword,
+            togglePassword,
+            onSubmit,
+        }) => html`
+            <form className="space-y-5" onSubmit=${onSubmit} noValidate>
+                <div className="space-y-4">
+                    <${SocialButton}
+                        provider="Google"
+                        icon=${Chrome}
+                        onClick=${() => setMessage({ type: "error", text: "Google sign-in is not configured yet. Use email login for now." })}
+                    />
+                    <${SocialButton}
+                        provider="GitHub"
+                        icon=${Github}
+                        onClick=${() => setMessage({ type: "error", text: "GitHub sign-in is not configured yet. Use email login for now." })}
+                    />
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className="h-px flex-1 bg-neutral-200 dark:bg-white/10"></div>
+                    <span className="text-xs font-bold uppercase text-neutral-400">or</span>
+                    <div className="h-px flex-1 bg-neutral-200 dark:bg-white/10"></div>
+                </div>
+
+                <div className="space-y-4">
+                    <${Field} id="loginEmail" label="Email" icon=${Mail} error=${errors.email}>
+                        <${AuthInput}
+                            id="loginEmail"
+                            type="email"
+                            inputMode="email"
+                            autoComplete="email"
+                            placeholder="name@company.com"
+                            value=${email}
+                            error=${errors.email}
+                            onInput=${(event) => setEmail(event.currentTarget.value)}
+                        />
+                    <//>
+
+                    <${Field} id="loginPassword" label="Password" icon=${LockKeyhole} error=${errors.password}>
+                        <${AuthInput}
+                            id="loginPassword"
+                            type=${showPassword ? "text" : "password"}
+                            autoComplete="current-password"
+                            placeholder="Enter your password"
+                            value=${password}
+                            error=${errors.password}
+                            className="pr-1"
+                            onInput=${(event) => setPassword(event.currentTarget.value)}
+                        />
+                        <button
+                            type="button"
+                            onClick=${togglePassword}
+                            aria-label=${showPassword ? "Hide password" : "Show password"}
+                            className="mr-2 grid h-9 w-9 shrink-0 place-items-center rounded-md text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+                        >
+                            ${showPassword
+                                ? html`<${EyeOff} className="h-4 w-4" aria-hidden="true" />`
+                                : html`<${Eye} className="h-4 w-4" aria-hidden="true" />`}
+                        </button>
+                    <//>
+                </div>
+
+                <${AuthMessage} message=${message} />
+
+                <${Button}
+                    type="submit"
+                    loading=${isLoading}
+                    aria-busy=${isLoading}
+                    className="w-full"
+                >
+                    <span>${isLoading ? "Signing in..." : "Log in"}</span>
+                    ${!isLoading && html`<${ArrowRight} className="h-4 w-4" aria-hidden="true" />`}
+                <//>
+
+                <button
+                    type="button"
+                    onClick=${() => {
+                        setMode("reset");
+                        setMessage({ type: "", text: "" });
+                    }}
+                    className="mx-auto block text-sm font-semibold text-indigo-600 transition hover:text-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
+                >
+                    Forgot password?
+                </button>
+            </form>
+        `;
+
+        const ResetForm = ({ message, setMessage, setMode }) => {
+            const [resetEmail, setResetEmail] = useState("");
+            const [otp, setOtp] = useState("");
+            const [newPassword, setNewPassword] = useState("");
+            const [confirmPassword, setConfirmPassword] = useState("");
+            const [errors, setErrors] = useState({});
+            const [isSending, setIsSending] = useState(false);
+            const [isResetting, setIsResetting] = useState(false);
+
+            const validateEmail = () => {
+                const nextErrors = {};
+                const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!resetEmail.trim()) nextErrors.resetEmail = "Email is required.";
+                else if (!emailPattern.test(resetEmail.trim())) nextErrors.resetEmail = "Enter a valid email address.";
+                setErrors(nextErrors);
+                return Object.keys(nextErrors).length === 0;
+            };
+
+            const validateReset = () => {
+                const nextErrors = {};
+                const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!resetEmail.trim()) nextErrors.resetEmail = "Email is required.";
+                else if (!emailPattern.test(resetEmail.trim())) nextErrors.resetEmail = "Enter a valid email address.";
+                if (!otp.trim()) nextErrors.otp = "OTP is required.";
+                if (newPassword.length < 6) nextErrors.newPassword = "Password must be at least 6 characters.";
+                if (newPassword !== confirmPassword) nextErrors.confirmPassword = "Passwords must match.";
+                setErrors(nextErrors);
+                return Object.keys(nextErrors).length === 0;
+            };
+
+            const sendOtp = async () => {
+                if (!validateEmail()) return;
+                setIsSending(true);
+                setMessage({ type: "", text: "" });
+                try {
+                    await postJson("/forgot-password/request", { email: resetEmail.trim() });
+                    setMessage({ type: "success", text: "OTP sent successfully. Check your email." });
+                } catch (error) {
+                    setMessage({ type: "error", text: error.message });
+                } finally {
+                    setIsSending(false);
+                }
+            };
+
+            const submitReset = async (event) => {
+                event.preventDefault();
+                if (!validateReset()) return;
+                setIsResetting(true);
+                setMessage({ type: "", text: "" });
+                try {
+                    await postJson("/forgot-password/verify", {
+                        email: resetEmail.trim(),
+                        otp: otp.trim(),
+                        new_password: newPassword,
+                    });
+                    setMode("login");
+                    setMessage({ type: "success", text: "Password changed successfully. Sign in with your new password." });
+                } catch (error) {
+                    setMessage({ type: "error", text: error.message });
+                } finally {
+                    setIsResetting(false);
+                }
+            };
+
+            return html`
+                <form className="space-y-5" onSubmit=${submitReset} noValidate>
+                    <div className="rounded-lg border border-indigo-100 bg-indigo-50/80 p-3 text-sm font-medium text-indigo-800 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-100">
+                        Enter your account email, request an OTP, then set a new password.
+                    </div>
+
+                    <${Field} id="resetEmail" label="Registered email" icon=${Mail} error=${errors.resetEmail}>
+                        <${AuthInput}
+                            id="resetEmail"
+                            type="email"
+                            inputMode="email"
+                            autoComplete="email"
+                            placeholder="name@company.com"
+                            value=${resetEmail}
+                            error=${errors.resetEmail}
+                            onInput=${(event) => setResetEmail(event.currentTarget.value)}
+                        />
+                    <//>
+
+                    <${Button}
+                        type="button"
+                        variant="secondary"
+                        loading=${isSending}
+                        onClick=${sendOtp}
+                        className="w-full"
+                    >
+                        ${isSending ? "Sending OTP..." : "Send OTP"}
+                    <//>
+
+                    <div className="grid gap-4">
+                        <${Field} id="resetOtp" label="OTP" icon=${ShieldCheck} error=${errors.otp}>
+                            <${AuthInput}
+                                id="resetOtp"
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                placeholder="Enter 6-digit OTP"
+                                value=${otp}
+                                error=${errors.otp}
+                                onInput=${(event) => setOtp(event.currentTarget.value)}
+                            />
+                        <//>
+
+                        <${Field} id="resetNewPassword" label="New password" icon=${LockKeyhole} error=${errors.newPassword}>
+                            <${AuthInput}
+                                id="resetNewPassword"
+                                type="password"
+                                autoComplete="new-password"
+                                placeholder="Create new password"
+                                value=${newPassword}
+                                error=${errors.newPassword}
+                                onInput=${(event) => setNewPassword(event.currentTarget.value)}
+                            />
+                        <//>
+
+                        <${Field} id="resetConfirmPassword" label="Confirm password" icon=${CheckCircle2} error=${errors.confirmPassword}>
+                            <${AuthInput}
+                                id="resetConfirmPassword"
+                                type="password"
+                                autoComplete="new-password"
+                                placeholder="Confirm new password"
+                                value=${confirmPassword}
+                                error=${errors.confirmPassword}
+                                onInput=${(event) => setConfirmPassword(event.currentTarget.value)}
+                            />
+                        <//>
+                    </div>
+
+                    <${AuthMessage} message=${message} />
+
+                    <${Button}
+                        type="submit"
+                        loading=${isResetting}
+                        className="w-full"
+                    >
+                        ${isResetting ? "Resetting password..." : "Reset password"}
+                    <//>
+
+                    <button
+                        type="button"
+                        onClick=${() => {
+                            setMode("login");
+                            setMessage({ type: "", text: "" });
+                        }}
+                        className="mx-auto block text-sm font-semibold text-indigo-600 transition hover:text-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
+                    >
+                        Back to login
+                    </button>
+                </form>
+            `;
+        };
+
+        const AuthCard = () => {
+            const shouldReduceMotion = useReducedMotion();
+            const [mode, setMode] = useState(() => new URLSearchParams(window.location.search).get("reset") === "1" ? "reset" : "login");
+            const [email, setEmail] = useState("");
+            const [password, setPassword] = useState("");
+            const [showPassword, setShowPassword] = useState(false);
+            const [isLoading, setIsLoading] = useState(false);
+            const [errors, setErrors] = useState({});
+            const [message, setMessage] = useState(() => {
+                const searchParams = new URLSearchParams(window.location.search);
+                if (searchParams.get("registered") === "1") {
+                    return { type: "success", text: "Account created. Sign in to continue." };
+                }
+                return { type: "", text: "" };
+            });
+
+            const motionProps = useMemo(() => shouldReduceMotion
+                ? {}
+                : {
+                    initial: { opacity: 0, y: 18, scale: 0.985 },
+                    animate: { opacity: 1, y: 0, scale: 1 },
+                    transition: { duration: 0.46, ease: [0.22, 1, 0.36, 1] },
+                },
+            [shouldReduceMotion]);
+
+            const validateLogin = () => {
+                const nextErrors = {};
+                const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!email.trim()) nextErrors.email = "Email is required.";
+                else if (!emailPattern.test(email.trim())) nextErrors.email = "Enter a valid email address.";
+                if (!password) nextErrors.password = "Password is required.";
+                else if (password.length < 6) nextErrors.password = "Password must be at least 6 characters.";
+                setErrors(nextErrors);
+                return Object.keys(nextErrors).length === 0;
+            };
+
+            const submitLogin = async (event) => {
+                event.preventDefault();
+                setMessage({ type: "", text: "" });
+                if (!validateLogin()) return;
+                setIsLoading(true);
+                try {
+                    const data = await postJson("/login", {
+                        email: email.trim(),
+                        password,
+                    });
+                    saveAuth(data);
+                    setMessage({ type: "success", text: "Login successful. Redirecting..." });
+                    window.setTimeout(() => {
+                        window.location.href = frontendPath("pages/dashboard.html");
+                    }, 800);
+                } catch (error) {
+                    setMessage({ type: "error", text: error.message });
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            return html`
+                <${motion.section}
+                    ...${motionProps}
+                    className="relative w-full max-w-[420px] rounded-[16px] border border-white/70 bg-white/[0.82] p-5 shadow-[0_24px_70px_rgba(35,44,87,0.18)] backdrop-blur-2xl dark:border-white/10 dark:bg-neutral-950/[0.76] dark:shadow-[0_24px_70px_rgba(0,0,0,0.38)] sm:p-7"
+                    aria-labelledby="auth-title"
+                >
+                    <div className="space-y-6">
+                        <${Logo} />
+
+                        <div className="space-y-2 text-center">
+                            <h1 id="auth-title" className="text-2xl font-extrabold tracking-normal text-neutral-950 dark:text-white">
+                                ${mode === "login" ? "Welcome back" : "Reset your password"}
+                            </h1>
+                            <p className="text-sm font-medium leading-6 text-neutral-600 dark:text-neutral-400">
+                                ${mode === "login"
+                                    ? "Log in to continue planning focused routines with your workspace."
+                                    : "Recover access with a secure OTP sent to your registered email."}
+                            </p>
+                            ${mode === "login" && html`
+                                <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                                    New here?
+                                    <a className="font-semibold text-indigo-600 transition hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200" href="register.html?from=home">
+                                        Create account
+                                    </a>
+                                </p>
+                            `}
+                        </div>
+
+                        <${AnimatePresence} mode="wait">
+                            ${mode === "login"
+                                ? html`
+                                    <${motion.div}
+                                        key="login"
+                                        initial=${shouldReduceMotion ? false : { opacity: 0, x: -12 }}
+                                        animate=${shouldReduceMotion ? false : { opacity: 1, x: 0 }}
+                                        exit=${shouldReduceMotion ? undefined : { opacity: 0, x: 12 }}
+                                        transition=${{ duration: 0.2 }}
+                                    >
+                                        <${LoginForm}
+                                            email=${email}
+                                            errors=${errors}
+                                            isLoading=${isLoading}
+                                            message=${message}
+                                            password=${password}
+                                            setEmail=${setEmail}
+                                            setMessage=${setMessage}
+                                            setMode=${setMode}
+                                            setPassword=${setPassword}
+                                            showPassword=${showPassword}
+                                            togglePassword=${() => setShowPassword((current) => !current)}
+                                            onSubmit=${submitLogin}
+                                        />
+                                    <//>
+                                `
+                                : html`
+                                    <${motion.div}
+                                        key="reset"
+                                        initial=${shouldReduceMotion ? false : { opacity: 0, x: 12 }}
+                                        animate=${shouldReduceMotion ? false : { opacity: 1, x: 0 }}
+                                        exit=${shouldReduceMotion ? undefined : { opacity: 0, x: -12 }}
+                                        transition=${{ duration: 0.2 }}
+                                    >
+                                        <${ResetForm}
+                                            message=${message}
+                                            setMessage=${setMessage}
+                                            setMode=${setMode}
+                                        />
+                                    <//>
+                                `}
+                        <//>
+                    </div>
+                <//>
+            `;
+        };
+
+        const App = () => {
+            return html`
+                <main className="auth-radial-bg grid min-h-screen place-items-center overflow-x-hidden px-4 py-8 text-neutral-950 dark:text-white sm:px-6">
+                    <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(255,255,255,0.35)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.35)_1px,transparent_1px)] bg-[size:72px_72px] opacity-25 dark:opacity-[0.04]" aria-hidden="true"></div>
+                    <div className="relative z-[1] grid w-full place-items-center">
+                        <${AuthCard} />
+                        <p className="mt-5 flex items-center justify-center gap-2 text-center text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                            <${HelpCircle} className="h-4 w-4" aria-hidden="true" />
+                            Need help? Contact support@routinecreator.app
+                        </p>
+                    </div>
+                </main>
+            `;
+        };
+
+        createRoot(document.getElementById("root")).render(html`<${App} />`);
+    </script>
+</body>
+</html>
