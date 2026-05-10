@@ -1,12 +1,11 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
+load_dotenv()
 
 def _normalize_database_url(database_url: str | None) -> str:
     if not database_url:

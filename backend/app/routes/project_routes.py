@@ -1,9 +1,9 @@
 from datetime import date
 import os
 import smtplib
-from urllib.parse import urlparse, urlencode
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
@@ -12,29 +12,12 @@ from ..database import get_db
 from ..models import User
 
 router = APIRouter(tags=["Project Management"])
-PRODUCTION_FRONTEND_URL = "https://frontend-jdpqhhqot-meghanachodiboyinas-projects.vercel.app"
 
 
-def _request_frontend_origin(request: Request) -> str:
-    origin = (request.headers.get("origin") or "").strip().rstrip("/")
-    if origin:
-        return origin
-
-    referer = (request.headers.get("referer") or "").strip()
-    if referer:
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-
-    return ""
-
-
-def _frontend_invite_url(invite_token: str, request: Request | None = None) -> str:
+def _frontend_invite_url(invite_token: str) -> str:
     configured_frontend = (os.getenv("FRONTEND_URL") or os.getenv("FRONTEND_ORIGIN") or "").strip().rstrip("/")
     if not configured_frontend or configured_frontend == "*":
-        configured_frontend = _request_frontend_origin(request) if request else ""
-    if not configured_frontend:
-        configured_frontend = PRODUCTION_FRONTEND_URL
+        configured_frontend = "http://127.0.0.1:5500/AutomatedRoutineCreator/frontend"
     return f"{configured_frontend}/accept-invite.html?{urlencode({'token': invite_token})}"
 
 
@@ -121,7 +104,6 @@ def list_workspace_invitations(
 @router.post("/workspace/invitations", response_model=schemas.MessageResponse, status_code=status.HTTP_201_CREATED)
 def create_workspace_invitation(
     payload: schemas.WorkspaceInviteCreate,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -129,7 +111,7 @@ def create_workspace_invitation(
         raise HTTPException(status_code=400, detail="You cannot invite your own email.")
     invite = crud.create_workspace_invite(db, current_user.id, payload.invitee_email.lower(), payload.role)
     settings = crud.get_workspace_settings_record(db, current_user)
-    invite_link = _frontend_invite_url(create_invite_token(invite.id, invite.invitee_email), request)
+    invite_link = _frontend_invite_url(create_invite_token(invite.id, invite.invitee_email))
     smtp_config = {
         "smtp_host": settings.smtp_host,
         "smtp_port": settings.smtp_port,

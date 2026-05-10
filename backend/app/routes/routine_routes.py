@@ -2,17 +2,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from fastapi import Body
 from .. import crud, schemas
-from ..ai_engine import AIServiceUnavailableError, check_groq_connection, generate_ai_plan, transcribe_audio_with_groq
+from ..ai_engine import generate_ai_plan, transcribe_audio_with_groq
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
 
 router = APIRouter(tags=["Routines"])
-
-
-@router.get("/ai/groq-status")
-async def groq_status(current_user: User = Depends(get_current_user)):
-    return await check_groq_connection()
 
 
 @router.get("/routines", response_model=list[schemas.RoutineOut])
@@ -71,10 +66,7 @@ async def generate_routine(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    try:
-        ai_plan = await generate_ai_plan(payload.input_text, payload.plan_scope)
-    except AIServiceUnavailableError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+    ai_plan = await generate_ai_plan(payload.input_text, payload.plan_scope)
     return ai_plan
 
 
@@ -92,6 +84,6 @@ async def transcribe_audio(
     if not text:
         raise HTTPException(
             status_code=503,
-            detail="Voice transcription is unavailable. Add GROQ_API_KEY or try again.",
+            detail="Voice transcription is unavailable. Add API_KEY or try again.",
         )
     return {"text": text}

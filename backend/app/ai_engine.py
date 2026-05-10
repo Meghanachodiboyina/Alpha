@@ -1,12 +1,9 @@
 import json
-import logging
 import os
 import re
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 
 import httpx
-from dotenv import load_dotenv
 
 from .schemas import (
     AIGenerationResponse,
@@ -14,40 +11,13 @@ from .schemas import (
     WorkspaceAIGeneratedTask,
 )
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
-
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_WHISPER_MODEL = "whisper-large-v3"
-logger = logging.getLogger(__name__)
-_last_groq_error = ""
-
-
-class AIServiceUnavailableError(RuntimeError):
-    pass
-
-
-def _set_last_groq_error(message: str) -> None:
-    global _last_groq_error
-    _last_groq_error = message
-
-
-def _get_last_groq_error() -> str:
-    return _last_groq_error
-
-
-def _extract_groq_error(response: httpx.Response) -> str:
-    try:
-        data = response.json()
-        message = data.get("error", {}).get("message") or data.get("detail") or response.text
-    except Exception:
-        message = response.text
-    message = re.sub(r"gsk_[A-Za-z0-9]+", "[redacted]", str(message))
-    return f"Groq returned {response.status_code}: {message[:300]}"
 
 
 def _groq_headers() -> dict[str, str] | None:
-    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         return None
     return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -57,40 +27,9 @@ def _groq_model() -> str:
     return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
-async def check_groq_connection() -> dict:
-    _set_last_groq_error("")
-    configured = bool(_groq_headers())
-    if not configured:
-        return {
-            "configured": False,
-            "ok": False,
-            "model": _groq_model(),
-            "error": _get_last_groq_error() or "GROQ_API_KEY is not configured in the backend environment.",
-        }
-
-    parsed = await _groq_chat_json_async(
-        messages=[
-            {
-                "role": "system",
-                "content": "Return JSON only in this exact shape: {\"ok\":true}",
-            },
-            {"role": "user", "content": "health check"},
-        ],
-        temperature=0,
-    )
-    return {
-        "configured": configured,
-        "ok": bool(parsed),
-        "model": _groq_model(),
-        "error": "" if parsed else (_get_last_groq_error() or "Groq returned no usable response."),
-    }
-
-
 async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: float = 0.35) -> dict | None:
     headers = _groq_headers()
     if not headers:
-        _set_last_groq_error("GROQ_API_KEY is not configured in the backend environment.")
-        logger.warning("Groq chat skipped: GROQ_API_KEY is not configured.")
         return None
 
     payload = {
@@ -105,34 +44,14 @@ async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: flo
             response = await client.post(GROQ_CHAT_COMPLETIONS_URL, headers=headers, json=payload)
             response.raise_for_status()
         raw_content = response.json()["choices"][0]["message"]["content"]
-        parsed = json.loads(raw_content)
-        logger.info(
-            "Groq chat JSON received with keys=%s using model=%s.",
-            list(parsed.keys()),
-            payload["model"],
-        )
-        return parsed
-    except httpx.HTTPStatusError as exc:
-        safe_error = _extract_groq_error(exc.response)
-        _set_last_groq_error(safe_error)
-        logger.warning(
-            "Groq chat request failed with status=%s body=%s",
-            exc.response.status_code,
-            exc.response.text[:500],
-        )
-        return None
-    except Exception as exc:
-        safe_error = f"Groq request failed: {exc}"
-        _set_last_groq_error(safe_error)
-        logger.warning("Groq chat request failed: %s", exc)
+        return json.loads(raw_content)
+    except Exception:
         return None
 
 
 def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -> dict | None:
     headers = _groq_headers()
     if not headers:
-        _set_last_groq_error("GROQ_API_KEY is not configured in the backend environment.")
-        logger.warning("Groq chat skipped: GROQ_API_KEY is not configured.")
         return None
 
     payload = {
@@ -147,26 +66,8 @@ def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -
             response = client.post(GROQ_CHAT_COMPLETIONS_URL, headers=headers, json=payload)
             response.raise_for_status()
         raw_content = response.json()["choices"][0]["message"]["content"]
-        parsed = json.loads(raw_content)
-        logger.info(
-            "Groq chat JSON received with keys=%s using model=%s.",
-            list(parsed.keys()),
-            payload["model"],
-        )
-        return parsed
-    except httpx.HTTPStatusError as exc:
-        safe_error = _extract_groq_error(exc.response)
-        _set_last_groq_error(safe_error)
-        logger.warning(
-            "Groq chat request failed with status=%s body=%s",
-            exc.response.status_code,
-            exc.response.text[:500],
-        )
-        return None
-    except Exception as exc:
-        safe_error = f"Groq request failed: {exc}"
-        _set_last_groq_error(safe_error)
-        logger.warning("Groq chat request failed: %s", exc)
+        return json.loads(raw_content)
+    except Exception:
         return None
 
 
@@ -175,7 +76,7 @@ async def transcribe_audio_with_groq(
     filename: str = "voice.webm",
     content_type: str = "audio/webm",
 ) -> str:
-    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key or not audio_bytes:
         return ""
 
@@ -193,10 +94,13 @@ async def transcribe_audio_with_groq(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(GROQ_TRANSCRIPTIONS_URL, headers=headers, data=data, files=files)
+            if response.status_code != 200:
+                print(f"Groq Transcription Error: {response.status_code} - {response.text}")
             response.raise_for_status()
         transcript = response.json().get("text", "")
         return re.sub(r"\s+", " ", str(transcript)).strip()
-    except Exception:
+    except Exception as e:
+        print(f"Transcription exception: {e}")
         return ""
 
 TIME_HINTS = {
@@ -263,188 +167,65 @@ def _strip_leading_phrase(task: str) -> str:
     filler_patterns = [
         r"\bmy\s+work\s+is\s+",
         r"\bmy\s+manager\s+(said|told\s+me|gave\s+me\s+work|asked\s+me)\s+(to\s+)?",
-        r"\b(today\s+)?i\s+(have\s+to|have|need\s+to|should|must|want\s+to|had\s+to|had|will)\s+",
-        r"\b(today\s+)?(have\s+to|need\s+to|want\s+to|had\s+to|had|then|also)\s+",
+        r"\b(today\s+)?i\s+(have\s+to|need\s+to|should|must|want\s+to|had\s+to|will)\s+",
         r"\b(can\s+you|could\s+you)\s+(please\s+)?(help\s+me\s+)?(to\s+)?",
         r"\bplease\s+",
         r"\bwant\s+to\s+",
     ]
     for pattern in filler_patterns:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\b(today|please|maybe|then|also)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(today|please|maybe)\b", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned)
-    if cleaned.strip().lower() in {"i need to", "i have to", "i should", "i want to", "my work is", "to", "and", "by"}:
+    if cleaned.strip().lower() in {"i need to", "i have to", "i should", "i want to", "my work is", "to"}:
         return ""
     return cleaned.strip(" .,-")
 
 
-def _apply_voice_corrections(text: str) -> str:
-    voice_corrections = {
-        r"\bbacon\b": "backend",
-        r"\bback end\b": "backend",
-        r"\bfront hand\b": "frontend",
-        r"\bfront end\b": "frontend",
-        r"\bdata bass\b": "database",
-        r"\bdata base\b": "database",
-        r"\bfast api\b": "FastAPI",
-        r"\ba p i\b": "API",
-        r"\bpost gray sql\b": "PostgreSQL",
-        r"\bsuper base\b": "Supabase",
-        r"\bauthentification\b": "authentication",
-    }
-    corrected = re.sub(r"\s+", " ", text.strip())
-    for pattern, replacement in voice_corrections.items():
-        corrected = re.sub(pattern, replacement, corrected, flags=re.IGNORECASE)
-    return corrected
-
-
-def _dedupe_words(text: str) -> str:
-    words = text.split()
-    deduped: list[str] = []
-    for word in words:
-        normalized = re.sub(r"[^a-z0-9]+", "", word.lower())
-        previous = re.sub(r"[^a-z0-9]+", "", deduped[-1].lower()) if deduped else ""
-        if normalized and normalized == previous:
-            continue
-        deduped.append(word)
-    return " ".join(deduped)
-
-
-def _title_case_task(text: str) -> str:
-    small_words = {"in", "for", "with", "of", "the", "a", "an", "at"}
+def _clean_planner_title(task: str) -> str:
+    cleaned = _strip_leading_phrase(task)
+    cleaned = re.sub(r"\b(today|tomorrow|morning|afternoon|evening|night|tonight)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bbefore\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\battend\s+a\s+meeting\b", "attend meeting", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bgo\s+to\s+the\s+gym\b", "go to gym", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,-")
+    if not cleaned:
+        cleaned = "Planned Task"
+    small_words = {"to", "in", "for", "with", "of", "the", "a", "an", "at", "on"}
     title_words = []
-    for index, word in enumerate(text.split()):
-        normalized = word.strip()
-        if index > 0 and normalized.lower() in small_words:
-            title_words.append(normalized.lower())
+    for index, word in enumerate(cleaned.split()):
+        if index > 0 and word.lower() in small_words:
+            title_words.append(word.lower())
         else:
-            title_words.append(normalized if normalized.isupper() else normalized.capitalize())
+            title_words.append(word if word.isupper() else word.capitalize())
     return (
         " ".join(title_words)
         .replace("Fastapi", "FastAPI")
         .replace("Api", "API")
         .replace("Ui", "UI")
-        .replace("Ux", "UX")
         .replace("Sql", "SQL")
-        .replace("Db", "DB")
     )
 
 
-def _clean_action_title(task: str, *, keep_movement_action: bool = False) -> str:
-    cleaned = _strip_leading_phrase(_apply_voice_corrections(task))
-    cleaned = re.sub(r"\b(today|tomorrow|morning|afternoon|evening|night|tonight)\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bbefore\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\b(and|then|also|by)\b$", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^(to|and|then|also|by)\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^(i\s+)?(had|have)\s+(a\s+)?", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^(have\s+to|need\s+to|want\s+to)\s+", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^(do|make)\s+(a\s+)?research\s+on\s+", "research ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^research\s+on\s+", "research ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^do\s+", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bmy\s+", "", cleaned, flags=re.IGNORECASE)
-    if not keep_movement_action:
-        cleaned = re.sub(r"^go\s+to\s+(the\s+)?", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"^go\s+", "", cleaned, flags=re.IGNORECASE)
-    else:
-        cleaned = re.sub(r"\bgo\s+to\s+the\s+gym\b", "go to gym", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,-")
-    cleaned = re.sub(r"\b(and|then|also|by)\b$", "", cleaned, flags=re.IGNORECASE).strip(" .,-")
-    cleaned = re.sub(r"^(to|and|then|also|by)\b", "", cleaned, flags=re.IGNORECASE).strip(" .,-")
-    cleaned = _dedupe_words(cleaned)
-    if not cleaned or cleaned.lower() in {"a", "an", "the", "to", "and", "then", "also", "by", "i had", "i have"}:
-        return ""
-    return _title_case_task(cleaned)[:120]
-
-
-def _clean_planner_title(task: str) -> str:
-    return _clean_action_title(task) or "Planned Task"
-
-
-def _task_extraction_messages(prompt: str, *, plan_scope: str | None = None) -> list[dict[str, str]]:
-    today = date.today().isoformat()
-    scope_line = f"Split this {plan_scope} routine request" if plan_scope else "Split this task request"
-    system_prompt = """
-    You are a senior productivity assistant and task-title editor.
-    Extract only real actionable tasks from natural text across software, office work, study, home routines, fitness,
-    shopping, meetings, travel, and mixed personal tasks.
-
-    Return JSON only:
-    {
-      "tasks": [
-        {
-          "title": "2 to 6 word clean task title",
-          "source_text": "original phrase with date/time words preserved",
-          "description": "short smart quote",
-          "priority": "Low|Medium|High",
-          "estimated_time": 30-240
-        }
-      ],
-      "productivity_tips": ["short useful tip"]
-    }
-
-    Rules:
-    - Split every distinct action/work item into its own task.
-    - Split by commas, and, then, also, next, plus, &, after, repeated action verbs, and multiple goals.
-    - Infer missing separators when users speak naturally, like "go college after coming home cook food attend meeting".
-    - Never return one long combined task when multiple actions exist.
-    - Titles must be professional, short, and clean.
-    - Remove filler and connectors from titles: and, by, I had, I have, have to, need to, go to, want to, then, also.
-    - Remove timing/context words from titles: today, tomorrow, morning, afternoon, evening, night, after coming home.
-    - Keep date/time/context words only in source_text so scheduling can still use them.
-    - Do not start titles with Go, And, Also, Then, To, Need, Have, Should, Want, By, or After.
-    - For "I have to go college after coming home cook food attend meeting", return titles: "College", "Cook Food", "Attend Meeting".
-    - For "Study python and do research on UI designing", return titles: "Study Python", "Research UI Designing".
-    """
-    user_prompt = f"""
-    Today's date is {today}
-
-    {scope_line}:
-
-    {prompt}
-    """
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-
-def _normalize_groq_task_items(raw_items: list[dict], *, max_tasks: int = 8) -> list[dict]:
-    normalized_items: list[dict] = []
-    seen_titles: set[str] = set()
-    for item in raw_items[:max_tasks]:
-        if not isinstance(item, dict):
-            continue
-        title = _clean_planner_title(str(item.get("title") or item.get("task") or ""))
-        if not title or title == "Planned Task" or title.lower() in seen_titles:
-            continue
-        priority = str(item.get("priority") or _guess_priority(title)).strip().capitalize()
-        if priority not in {"Low", "Medium", "High"}:
-            priority = _guess_priority(title)
-        estimated_time = item.get("estimated_time") or _guess_duration(title)
-        try:
-            estimated_time = max(30, min(int(estimated_time), 240))
-        except (TypeError, ValueError):
-            estimated_time = _guess_duration(title)
-        seen_titles.add(title.lower())
-        normalized_items.append({
-            "title": title,
-            "source_text": str(item.get("source_text") or item.get("raw_text") or item.get("context") or title),
-            "description": str(item.get("description") or item.get("quote") or "").strip(),
-            "priority": priority,
-            "estimated_time": estimated_time,
-        })
-    return normalized_items
-
-
 def _extract_tasks(input_text: str) -> list[str]:
-    normalized = _apply_voice_corrections(re.sub(r"[\r\n]+", ", ", input_text.strip()))
+    normalized = re.sub(r"[\r\n]+", ", ", input_text.strip())
+    voice_corrections = {
+        r"\bbacon\b": "backend",
+        r"\bback end\b": "backend",
+        r"\bfront hand\b": "frontend",
+        r"\bdata bass\b": "database",
+        r"\bdata base\b": "database",
+        r"\ba p i\b": "API",
+        r"\bfast api\b": "FastAPI",
+    }
+    for pattern, replacement in voice_corrections.items():
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\bgo\s+to\s+the\s+gym\b", "go to gym", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\bgo\s+gym\b", "go to gym", normalized, flags=re.IGNORECASE)
     action_verbs = (
         "wake|study|learn|cook|sleep|call|send|practice|wash|clean|buy|complete|finish|fix|"
         "connect|create|update|deploy|book|pack|write|read|review|design|build|test|"
-        "attend|go|submit|prepare|exercise|pay|schedule|visit|make|do|plan|debug|implement|work"
+        "attend|go|submit|prepare|exercise|pay|schedule|visit|make|plan|debug|implement|work"
     )
 
     def split_chunk_on_actions(chunk: str) -> list[str]:
@@ -467,9 +248,7 @@ def _extract_tasks(input_text: str) -> list[str]:
         return segments
 
     normalized = re.sub(r"\b(and then|then|also|after that|afterwards|next|plus|along with)\b", ",", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(rf"\s+\band\b\s+(?=(?:i\s+)?(?:have\s+to|need\s+to|want\s+to|had\s+to|had|will|am\s+going\s+to)?\s*\b(?:{action_verbs})\b)", ", ", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\s+\band\b\s+(?=(?:i\s+)?(?:have\s+to|need\s+to|want\s+to|had\s+to|had|will)\b)", ", ", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\s+\band\b\s+(?=(?:to|by)\b)", ", ", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(rf"\s+\band\b\s+(?=\b(?:{action_verbs})\b)", ", ", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\s*&\s*", ", ", normalized)
     normalized = normalized.lstrip(" ,")
 
@@ -479,9 +258,8 @@ def _extract_tasks(input_text: str) -> list[str]:
         for task in split_chunk_on_actions(chunk):
             cleaned = _strip_leading_phrase(task)
             cleaned = re.sub(r"^(to|and|then|also)\b", "", cleaned, flags=re.IGNORECASE).strip(" .,-")
-            title = _clean_planner_title(cleaned)
-            key = title.lower()
-            if cleaned and key not in {"to", "and", "then", "also", "by", "planned task"} and key not in seen:
+            key = cleaned.lower()
+            if cleaned and key not in {"to", "and", "then", "also"} and key not in seen:
                 seen.add(key)
                 tasks.append(cleaned)
     return tasks or [_strip_leading_phrase(input_text) or input_text.strip()]
@@ -755,39 +533,78 @@ def generate_heuristic_plan(input_text: str, plan_scope: str) -> AIGenerationRes
 
 
 async def generate_ai_plan(input_text: str, plan_scope: str) -> AIGenerationResponse:
-    logger.info(
-        "Planner AI request started with groq_configured=%s model=%s scope=%s",
-        bool(_groq_headers()),
-        _groq_model(),
-        plan_scope,
-    )
+    today = date.today().isoformat()
+    fallback_tasks = _extract_tasks(input_text)
+    system_prompt = """
+    You are a senior productivity planner. Extract clean separate routine tasks from natural language.
+
+    Return JSON only with:
+    {
+      "tasks": [
+        {
+          "title": "short clean professional task title",
+          "source_text": "the original phrase with date/time words preserved",
+          "priority": "High|Medium|Low",
+          "estimated_time": 30-240
+        }
+      ],
+      "productivity_tips": ["short useful tip"]
+    }
+
+    Rules:
+    - Split every distinct action into its own task.
+    - Split by commas, and, then, also, next, plus, &, time mentions, repeated action verbs, and multiple goals.
+    - Never return one long combined task when multiple actions exist.
+    - Remove filler from title: today, tomorrow, morning, afternoon, evening, night, please, I need to, I have to.
+    - Keep date/time words only inside source_text so scheduling can use them.
+    - Titles must be short and clean, like "Study Python" or "Work on FastAPI Backend".
+    - Preserve prompt order unless a specific time makes a task naturally anchored.
+    - For "Work on FastAPI backend and work on frontend Swagger UI", return two tasks.
+    """
+
+    user_prompt = f"""
+    Today's date is {today}
+
+    Split this {plan_scope} routine request:
+
+    {input_text}
+    """
+
     parsed = await _groq_chat_json_async(
-        messages=_task_extraction_messages(_apply_voice_corrections(input_text), plan_scope=plan_scope),
-        temperature=0.45,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.3,
     )
-    if not parsed:
-        detail = _get_last_groq_error() or "Check GROQ_API_KEY, network access, and the Groq service response."
-        raise AIServiceUnavailableError(f"Planner AI could not reach Groq. {detail}")
+    if parsed:
+        raw_items = parsed.get("tasks") or []
+        groq_tasks: list[dict] = []
+        seen_titles: set[str] = set()
+        for item in raw_items:
+            title = _clean_planner_title(str(item.get("title") or item.get("task") or ""))
+            if not title or title.lower() in seen_titles:
+                continue
+            seen_titles.add(title.lower())
+            groq_tasks.append({
+                "title": title,
+                "source_text": str(item.get("source_text") or item.get("raw_text") or item.get("context") or title),
+                "priority": item.get("priority") or _guess_priority(title),
+                "estimated_time": item.get("estimated_time") or _guess_duration(title),
+            })
 
-    groq_tasks = _normalize_groq_task_items(parsed.get("tasks") or [], max_tasks=8)
-    if not groq_tasks:
-        logger.warning("Groq planner response did not contain usable tasks: keys=%s", list(parsed.keys()))
-        raise AIServiceUnavailableError("Planner AI received an empty Groq response. Please try again with a clearer task prompt.")
+        if groq_tasks:
+            planned_routines = _build_schedule(groq_tasks[:8], plan_scope)
+            tips = parsed.get("productivity_tips") or [
+                "The routine was split into clear action blocks so each item is easier to complete."
+            ]
+            return AIGenerationResponse(
+                summary=f"Built a Groq-powered {plan_scope} routine with {len(planned_routines)} clean task blocks.",
+                productivity_tips=[str(tip) for tip in tips[:4]],
+                routines=planned_routines,
+            )
 
-    planned_routines = _build_schedule(groq_tasks, plan_scope)
-    tips = parsed.get("productivity_tips") or [
-        "The routine was split into clear action blocks so each item is easier to complete."
-    ]
-    logger.info(
-        "Planner Groq generation succeeded with %s tasks: %s",
-        len(planned_routines),
-        [routine.title for routine in planned_routines],
-    )
-    return AIGenerationResponse(
-        summary=f"Built a Groq-powered {plan_scope} routine with {len(planned_routines)} clean task blocks.",
-        productivity_tips=[str(tip) for tip in tips[:4]],
-        routines=planned_routines,
-    )
+    return generate_heuristic_plan(input_text, plan_scope)
 
 
 def generate_workspace_ai_tasks(
@@ -1004,17 +821,18 @@ def generate_workspace_ai_tasks(
         return unique_parts[:5] or ([fallback] if fallback else [clean_main_task(subject)])
 
     def normalize_generated_items(items: list[dict]) -> list[WorkspaceAIGeneratedTask]:
-        shared_items = _normalize_groq_task_items(items, max_tasks=5)
         normalized_items: list[WorkspaceAIGeneratedTask] = []
-        for index, item in enumerate(shared_items, start=1):
+        for index, item in enumerate(items[:5], start=1):
             title = str(item.get("title") or item.get("task") or "").strip()
             if not title:
                 continue
-            priority = str(item.get("priority") or infer_main_task_priority(title)).strip().capitalize()
+            priority = str(item.get("priority") or "Medium").strip().capitalize()
+            if priority not in {"Low", "Medium", "High"}:
+                priority = "Medium"
             description = str(item.get("description") or item.get("quote") or task_quote(title)).strip()
             normalized_items.append(
                 WorkspaceAIGeneratedTask(
-                    title=title[:120],
+                    title=clean_main_task(title)[:120],
                     description=description[:220],
                     assignee=assignee or "Unassigned",
                     priority=priority,
@@ -1027,22 +845,40 @@ def generate_workspace_ai_tasks(
         return normalized_items
 
     groq_result = _groq_chat_json(
-        messages=_task_extraction_messages(prompt_clean),
-        temperature=0.45,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior productivity assistant. Extract only real actionable tasks from natural text "
+                    "across software, office work, study, home routines, fitness, shopping, meetings, travel, and "
+                    "mixed personal tasks. Remove filler like manager said, I need to, please do, can you help, and "
+                    "today I want. Create exactly as many main tasks as the user mentioned, up to 5. Do not create "
+                    "subtasks or step-by-step breakdown. Each description must be one short premium quote related "
+                    "to the task type, never repeat the task title, and never use generic completion filler. "
+                    "Return JSON only: {\"tasks\":[{\"title\":\"...\",\"description\":\"short smart quote\","
+                    "\"priority\":\"Low|Medium|High\"}]}"
+                ),
+            },
+            {"role": "user", "content": prompt_clean},
+        ],
+        temperature=0.55,
     )
     if groq_result:
         groq_tasks = normalize_generated_items(groq_result.get("tasks", []))
         if groq_tasks:
-            logger.info(
-                "Workspace Groq generation succeeded with %s tasks: %s",
-                len(groq_tasks),
-                [task.title for task in groq_tasks],
-            )
             return groq_tasks
 
-    if groq_result:
-        logger.warning("Groq workspace response did not contain usable tasks: keys=%s", list(groq_result.keys()))
-        raise AIServiceUnavailableError("Workspace AI received an empty Groq response. Please try again with a clearer task prompt.")
-
-    detail = _get_last_groq_error() or "Check GROQ_API_KEY, network access, and the Groq service response."
-    raise AIServiceUnavailableError(f"Workspace AI could not reach Groq. {detail}")
+    main_tasks = split_main_tasks(prompt_clean)
+    return [
+        WorkspaceAIGeneratedTask(
+            title=title,
+            description=task_quote(title),
+            assignee=assignee or "Unassigned",
+            priority=infer_main_task_priority(title),
+            status="Todo",
+            due_date=date.today() if due_today else date.today() + timedelta(days=index),
+            progress=0,
+            project_name=project_name,
+        )
+        for index, title in enumerate(main_tasks, start=1)
+    ]
