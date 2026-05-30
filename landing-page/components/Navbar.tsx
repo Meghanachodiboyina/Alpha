@@ -41,6 +41,8 @@ export default function Navbar() {
     { label: 'Features', href: '/#features' },
     { label: 'How it works', href: '/#how' },
     { label: 'For Teams', href: '/#teams' },
+    { label: 'About Us', href: '/about' },
+    { label: 'Pricing', href: '/pricing' },
   ];
 
   return (
