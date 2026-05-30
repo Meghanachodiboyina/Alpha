@@ -1,15 +1,15 @@
-# Virtual Environment
+# Virtual Environments (Python)
 venv/
 backend/venv/
 .venv/
+env/
 
-# Python
+# Python bytecode/caches
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
-env/
 pip-log.txt
 pip-delete-this-directory.txt
 .tox/
@@ -17,25 +17,40 @@ pip-delete-this-directory.txt
 .cache
 nosetests.xml
 coverage.xml
-*,cover
+*.cover
 .hypothesis/
 
-# Environment Files
+# Environment Files (Ignore ALL local secret files anywhere)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-backend/.env
-frontend/.env.local
+*.env
+.env.*
+**/.env
+**/.env.*
+
+# Node.js / React / Next.js dependency & build folders (covers landing-page, mobile-app-ui, etc.)
+node_modules/
+.next/
+dist/
+build/
+out/
+web-build/
+.expo/
+*.tsbuildinfo
+next-env.d.ts
+expo-env.d.ts
 
 # OS Files
 .DS_Store
 Thumbs.db
+*.pem
+*.key
 
 # IDEs
 .vscode/
 .idea/
 
-# Local database
+# Local databases
 backend/arc_local.db
+*.db
+*.sqlite
+*.sqlite3

@@ -159,10 +159,17 @@ def ai_generate_workspace_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    projects = crud.get_workspace_projects(db, current_user)
+    members = crud.get_workspace_members(db, current_user)
+    available_projects = [p.name for p in projects]
+    available_members = [m.name for m in members]
+
     generated_tasks = generate_workspace_ai_tasks(
         prompt=payload.prompt,
         project_name=payload.project_name,
         assignee=payload.assignee or current_user.name,
+        available_projects=available_projects,
+        available_members=available_members,
     )
     created_tasks = crud.create_many_workspace_tasks(
         db,

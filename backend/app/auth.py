@@ -12,17 +12,24 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
+from supabase import create_client, Client
 
 from . import models
+from .config import settings
 from .database import get_db
 
-load_dotenv()
-
-SECRET_KEY = os.getenv("SECRET_KEY") or "development-secret-key"
-ALGORITHM = os.getenv("ALGORITHM") or "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = settings.ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+
+from typing import Any
+
+if settings.SUPABASE_URL and settings.SUPABASE_ANON_KEY:
+    supabase_client: Client | None = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+else:
+    supabase_client = None
 
 
 def _clean_config_value(value: str | None) -> str | None:
@@ -92,11 +99,11 @@ def _send_email_message(
 
 
 def send_password_reset_email(recipient_email: str, otp_code: str) -> None:
-    smtp_host = _clean_config_value(os.getenv("SMTP_HOST"))
-    smtp_port = int(_clean_config_value(os.getenv("SMTP_PORT")) or "587")
-    smtp_username = _clean_config_value(os.getenv("SMTP_USERNAME"))
-    smtp_password = _clean_config_value(os.getenv("SMTP_PASSWORD"))
-    smtp_from = _clean_config_value(os.getenv("SMTP_FROM_EMAIL")) or smtp_username or "no-reply@example.com"
+    smtp_host = _clean_config_value(settings.SMTP_HOST)
+    smtp_port = settings.SMTP_PORT
+    smtp_username = _clean_config_value(settings.SMTP_USERNAME)
+    smtp_password = _clean_config_value(settings.SMTP_PASSWORD)
+    smtp_from = _clean_config_value(settings.SMTP_FROM_EMAIL) or smtp_username or "no-reply@example.com"
 
     if not smtp_host or not smtp_username or not smtp_password:
         raise RuntimeError("Password reset email is not configured on the server.")
@@ -122,13 +129,13 @@ def send_workspace_invite_email(
     smtp_config: dict | None = None,
 ) -> None:
     smtp_config = smtp_config or {}
-    smtp_host = _clean_config_value(smtp_config.get("smtp_host")) or _clean_config_value(os.getenv("SMTP_HOST"))
-    smtp_port = int(smtp_config.get("smtp_port") or _clean_config_value(os.getenv("SMTP_PORT")) or "587")
-    smtp_username = _clean_config_value(smtp_config.get("smtp_username")) or _clean_config_value(os.getenv("SMTP_USERNAME"))
-    smtp_password = _clean_config_value(smtp_config.get("smtp_password")) or _clean_config_value(os.getenv("SMTP_PASSWORD"))
+    smtp_host = _clean_config_value(smtp_config.get("smtp_host")) or _clean_config_value(settings.SMTP_HOST)
+    smtp_port = int(smtp_config.get("smtp_port") or settings.SMTP_PORT)
+    smtp_username = _clean_config_value(smtp_config.get("smtp_username")) or _clean_config_value(settings.SMTP_USERNAME)
+    smtp_password = _clean_config_value(smtp_config.get("smtp_password")) or _clean_config_value(settings.SMTP_PASSWORD)
     smtp_from = (
         _clean_config_value(smtp_config.get("smtp_from_email"))
-        or _clean_config_value(os.getenv("SMTP_FROM_EMAIL"))
+        or _clean_config_value(settings.SMTP_FROM_EMAIL)
         or smtp_username
         or "no-reply@example.com"
     )
@@ -213,14 +220,23 @@ def get_current_user(
     )
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: int | None = payload.get("sub")
-        if user_id is None:
+        if not supabase_client:
             raise credentials_exception
-    except JWTError as exc:
+        user_response = supabase_client.auth.get_user(token)
+        if not user_response or not user_response.user:
+            raise credentials_exception
+        
+        user_data: Any = user_response.user
+        user_id_str = user_data.id
+        email = user_data.email
+    except Exception as exc:
         raise credentials_exception from exc
 
-    user = db.query(models.User).filter(models.User.id == int(user_id)).first()
+    user = db.query(models.User).filter(models.User.id == user_id_str).first()
     if user is None:
-        raise credentials_exception
+        user = models.User(id=user_id_str, email=email, name=email.split('@')[0], password_hash="")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
     return user

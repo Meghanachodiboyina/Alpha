@@ -54,6 +54,8 @@ class RoutineBase(BaseModel):
     priority: str = Field(default="Medium")
     status: str = Field(default="Pending")
     estimated_time: int = Field(default=60, ge=5, le=720)
+    focus_mode_recommended: bool = Field(default=False)
+    is_internal: bool = Field(default=False)
     suggestion: Optional[str] = Field(default=None, max_length=2000)
 
     @field_validator("description", "suggestion", mode="before")
@@ -109,6 +111,7 @@ class RoutineUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
     estimated_time: Optional[int] = Field(default=None, ge=5, le=720)
+    focus_mode_recommended: Optional[bool] = None
     suggestion: Optional[str] = Field(default=None, max_length=2000)
 
     @field_validator("description", "suggestion", mode="before")
@@ -157,7 +160,7 @@ class RoutineUpdate(BaseModel):
 
 class RoutineOut(RoutineBase):
     id: int
-    user_id: int
+    user_id: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -166,6 +169,7 @@ class RoutineOut(RoutineBase):
 class AIGenerationRequest(BaseModel):
     input_text: str = Field(..., min_length=5, max_length=5000)
     plan_scope: str = Field(default="daily")
+    current_time: Optional[str] = Field(default=None, description="The user's local current time in ISO format or descriptive string")
 
     @field_validator("plan_scope")
     @classmethod
@@ -186,6 +190,8 @@ class AIPlannedRoutine(BaseModel):
     priority: str
     status: str = "Pending"
     estimated_time: int
+    focus_mode_recommended: bool = False
+    is_internal: bool = False
     suggestion: str
 
 
@@ -193,6 +199,43 @@ class AIGenerationResponse(BaseModel):
     summary: str
     productivity_tips: list[str]
     routines: list[AIPlannedRoutine]
+
+
+class AIClarificationOption(BaseModel):
+    value: str
+    label: str
+    emoji: Optional[str] = None
+
+
+class AIClarificationQuestion(BaseModel):
+    id: str  # e.g. "travel_0", "personality"
+    question: str  # Short mobile-friendly question text
+    type: str = "single_choice"  # "single_choice" | "confirm"
+    options: list[AIClarificationOption]
+    task_title: Optional[str] = None  # Which task this relates to (null for global)
+    default_value: Optional[str] = None  # Best-guess default
+
+
+class AIAnalysisResponse(BaseModel):
+    needs_clarification: bool
+    clarifications: list[AIClarificationQuestion] = []
+    result: Optional[AIGenerationResponse] = None  # Present when no clarification needed
+
+
+class AIGenerationWithClarifications(BaseModel):
+    input_text: str = Field(..., min_length=5, max_length=5000)
+    plan_scope: str = Field(default="daily")
+    current_time: Optional[str] = Field(default=None)
+    clarifications: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("plan_scope")
+    @classmethod
+    def validate_scope(cls, value: str) -> str:
+        allowed = {"daily", "weekly", "today"}
+        normalized = value.lower()
+        if normalized not in allowed:
+            raise ValueError("plan_scope must be daily, weekly, or today.")
+        return normalized
 
 
 class DashboardStats(BaseModel):
@@ -294,7 +337,7 @@ class ProjectTaskUpdate(BaseModel):
 
 class ProjectTaskOut(ProjectTaskBase):
     id: int
-    user_id: int
+    user_id: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -336,7 +379,7 @@ class WorkspaceInviteTokenAccept(BaseModel):
 
 class WorkspaceInviteOut(BaseModel):
     id: int
-    inviter_user_id: int
+    inviter_user_id: str
     inviter_name: str
     invitee_email: EmailStr
     role: str
@@ -371,7 +414,7 @@ class WorkspaceProjectCreate(WorkspaceProjectBase):
 
 class WorkspaceProjectOut(WorkspaceProjectBase):
     id: int
-    user_id: int
+    user_id: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -467,7 +510,7 @@ class WorkspaceTaskUpdate(BaseModel):
 
 class WorkspaceTaskOut(WorkspaceTaskBase):
     id: int
-    user_id: int
+    user_id: str
     owner_name: Optional[str] = None
     created_at: datetime
 

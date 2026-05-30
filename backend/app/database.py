@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-load_dotenv()
+from .config import settings
 
 def _normalize_database_url(database_url: str | None) -> str:
     if not database_url:
@@ -17,12 +17,8 @@ def _normalize_database_url(database_url: str | None) -> str:
         return normalized_url.replace("postgresql://", "postgresql+psycopg2://", 1)
     return normalized_url
 
-SQLITE_FALLBACK_URL = os.getenv(
-    "SQLITE_FALLBACK_URL",
-    f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(__file__)), 'arc_local.db')}",
-)
-
-DATABASE_URL = _normalize_database_url(os.getenv("DATABASE_URL")) or SQLITE_FALLBACK_URL
+SQLITE_FALLBACK_URL = settings.SQLITE_FALLBACK_URL
+DATABASE_URL = _normalize_database_url(settings.DATABASE_URL) or SQLITE_FALLBACK_URL
 
 
 def _create_engine(database_url: str):

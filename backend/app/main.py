@@ -4,10 +4,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .config import settings
 from .database import Base, engine
 from .routes import auth_routes, dashboard_routes, project_routes, routine_routes, workspace_routes
-
-load_dotenv()
 
 Base.metadata.create_all(bind=engine)
 
@@ -17,7 +16,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-frontend_origin = os.getenv("FRONTEND_ORIGIN", "*")
+frontend_origin = settings.FRONTEND_ORIGIN
 
 app.add_middleware(
     CORSMiddleware,

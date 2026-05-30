@@ -4,10 +4,16 @@ import re
 from datetime import date, datetime, time, timedelta
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from .config import settings
 
 from .schemas import (
     AIGenerationResponse,
     AIPlannedRoutine,
+    AIClarificationQuestion,
+    AIClarificationOption,
+    AIAnalysisResponse,
     WorkspaceAIGeneratedTask,
 )
 
@@ -17,16 +23,17 @@ GROQ_WHISPER_MODEL = "whisper-large-v3"
 
 
 def _groq_headers() -> dict[str, str] | None:
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = settings.GROQ_API_KEY
     if not api_key:
         return None
     return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
 
 def _groq_model() -> str:
-    return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    return settings.GROQ_MODEL
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPStatusError))
 async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: float = 0.35) -> dict | None:
     headers = _groq_headers()
     if not headers:
@@ -45,10 +52,14 @@ async def _groq_chat_json_async(messages: list[dict[str, str]], temperature: flo
             response.raise_for_status()
         raw_content = response.json()["choices"][0]["message"]["content"]
         return json.loads(raw_content)
-    except Exception:
+    except Exception as e:
+        import traceback
+        print(f"Groq API Error: {e}")
+        traceback.print_exc()
         return None
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPStatusError))
 def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -> dict | None:
     headers = _groq_headers()
     if not headers:
@@ -71,12 +82,13 @@ def _groq_chat_json(messages: list[dict[str, str]], temperature: float = 0.45) -
         return None
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPStatusError))
 async def transcribe_audio_with_groq(
     audio_bytes: bytes,
     filename: str = "voice.webm",
     content_type: str = "audio/webm",
 ) -> str:
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = settings.GROQ_API_KEY
     if not api_key or not audio_bytes:
         return ""
 
@@ -152,9 +164,9 @@ KEYWORD_DURATIONS = {
 }
 
 MEAL_TIME_HINTS = {
-    "breakfast": time(7, 30),
-    "lunch": time(12, 30),
-    "dinner": time(19, 0),
+    "breakfast": time(8, 30),
+    "lunch": time(13, 30),
+    "dinner": time(20, 30),
 }
 
 
@@ -464,153 +476,591 @@ def _normalize_priority(value: str | None, fallback_task: str) -> str:
     return _guess_priority(fallback_task)
 
 
-def _build_schedule(tasks: list[str | dict], plan_scope: str) -> list[AIPlannedRoutine]:
+TRAVEL_TIER_BUFFERS = {
+    "nearby": 15,
+    "moderate": 30,
+    "long_travel": 60,
+}
+
+
+def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datetime | None = None, personality: str = "Balanced", travel_overrides: dict[int, str] | None = None) -> list[AIPlannedRoutine]:
+    valid_tasks = [t for t in ai_tasks if t.get("confidence", 1.0) >= 0.5]
+    if not valid_tasks:
+        return []
+
     planned_routines: list[AIPlannedRoutine] = []
-    current_slot_by_date: dict[date, datetime] = {}
-    occupied_slots_by_date: dict[date, list[tuple[datetime, datetime]]] = {}
+    
+    today_date = start_after.date() if start_after else date.today()
+    base_time = start_after if start_after else datetime.combine(today_date, time(8, 0))
+    end_of_day = datetime.combine(today_date, time(23, 59))
+    
+    occupied_slots: list[tuple[datetime, datetime]] = []
+    
+    def add_slot(start: datetime, duration_mins: int) -> tuple[datetime, datetime]:
+        end = start + timedelta(minutes=duration_mins)
+        occupied_slots.append((start, end))
+        occupied_slots.sort(key=lambda s: s[0])
+        return start, end
 
-    for task_index, task_item in enumerate(tasks):
-        if isinstance(task_item, dict):
-            title_override = _clean_planner_title(str(task_item.get("title") or task_item.get("task") or ""))
-            raw_task = str(task_item.get("source_text") or task_item.get("raw_text") or task_item.get("context") or title_override)
-            priority = _normalize_priority(str(task_item.get("priority") or ""), raw_task)
-            estimated_time = int(task_item.get("estimated_time") or _guess_duration(raw_task))
+    def is_slot_free(start: datetime, duration_mins: int) -> bool:
+        end = start + timedelta(minutes=duration_mins)
+        if end > end_of_day:
+            return False
+        for s_start, s_end in occupied_slots:
+            if start < s_end and end > s_start:
+                return False
+        return True
+
+    def find_free_slot(search_start: datetime, duration_mins: int, energy_req: str = "Medium") -> datetime | None:
+        candidate = search_start
+        step = timedelta(minutes=15)
+        remainder = candidate.minute % 15
+        if remainder != 0:
+            candidate += timedelta(minutes=(15 - remainder))
+            
+        while candidate + timedelta(minutes=duration_mins) <= end_of_day:
+            if is_slot_free(candidate, duration_mins):
+                # Calm personality avoids High energy tasks late at night if possible
+                if energy_req == "High" and personality == "Calm" and candidate.time() >= time(17, 0):
+                    pass # We ideally skip this, but we rely on fallback if no earlier slot exists
+                return candidate
+            candidate += step
+        return None
+
+    fixed_tasks = [t for t in valid_tasks if t.get("is_fixed_time", False)]
+    flexible_tasks = [t for t in valid_tasks if not t.get("is_fixed_time", False)]
+    
+    # Layer 1: Fixed Events
+    for ti, t in enumerate(fixed_tasks):
+        start_time_str = t.get("time_constraint")
+        duration = t.get("estimated_duration") or 60
+        start_dt = None
+        if start_time_str:
+            try:
+                dt_time = datetime.strptime(start_time_str, "%H:%M").time()
+                start_dt = datetime.combine(today_date, dt_time)
+            except ValueError:
+                pass
+        
+        if not start_dt:
+            start_dt = find_free_slot(base_time, duration, "High") or base_time
+
+        s, e = add_slot(start_dt, duration)
+        
+        if t.get("requires_travel"):
+            # Determine commute buffer from clarifications or task's travel_tier
+            task_idx = valid_tasks.index(t)
+            travel_key = f"travel_{task_idx}"
+            if travel_overrides and travel_key in travel_overrides:
+                travel_tier = travel_overrides[travel_key]
+            else:
+                travel_tier = t.get("travel_tier", "moderate")
+            commute_mins = TRAVEL_TIER_BUFFERS.get(travel_tier, 30)
+
+            buffer_start = max(base_time, s - timedelta(minutes=commute_mins))
+            if buffer_start < s:
+                add_slot(buffer_start, int((s - buffer_start).total_seconds() // 60))
+                planned_routines.append({
+                    "task": {
+                        "title": f"Commute to {t.get('title', 'Event')}",
+                        "priority": "Medium",
+                        "energy_requirement": "Low",
+                        "is_fixed_time": False,
+                        "is_internal_logistic": True
+                    },
+                    "start": buffer_start,
+                    "end": s
+                })
+            if e + timedelta(minutes=commute_mins) <= end_of_day:
+                add_slot(e, commute_mins)
+                planned_routines.append({
+                    "task": {
+                        "title": "Return Commute",
+                        "priority": "Medium",
+                        "energy_requirement": "Low",
+                        "is_fixed_time": False,
+                        "is_internal_logistic": True
+                    },
+                    "start": e,
+                    "end": e + timedelta(minutes=commute_mins)
+                })
+
+        planned_routines.append({"task": t, "start": s, "end": e})
+
+    # Layer 2: Flexible & Focus Tasks (Grouped by Context & Paced)
+    def flex_sort_key(t):
+        energy = str(t.get("energy_requirement", "Medium")).capitalize()
+        e_score = 0 if energy == "High" else 1 if energy == "Medium" else 2
+        ctx = str(t.get("context_group", "Other"))
+        return (ctx, e_score)
+
+    flexible_tasks.sort(key=flex_sort_key)
+    
+    current_search = base_time
+    
+    break_duration = 15
+    if personality == "Aggressive":
+        break_duration = 0
+    elif personality == "Calm":
+        break_duration = 30
+        
+    for i, t in enumerate(flexible_tasks):
+        duration = t.get("estimated_duration") or 60
+        energy = str(t.get("energy_requirement", "Medium")).capitalize()
+        
+        slot = find_free_slot(current_search, duration, energy)
+        
+        if not slot:
+            shrinked_duration = max(30, duration // 2)
+            slot = find_free_slot(current_search, shrinked_duration, energy)
+            if slot:
+                duration = shrinked_duration
+            else:
+                slot = occupied_slots[-1][1] if occupied_slots else current_search
+        
+        s, e = add_slot(slot, duration)
+
+        # Inject commute buffers for flexible tasks that require travel
+        if t.get("requires_travel"):
+            task_idx = valid_tasks.index(t)
+            travel_key = f"travel_{task_idx}"
+            if travel_overrides and travel_key in travel_overrides:
+                travel_tier = travel_overrides[travel_key]
+            else:
+                travel_tier = t.get("travel_tier", "moderate")
+            commute_mins = TRAVEL_TIER_BUFFERS.get(travel_tier, 30)
+
+            buffer_start = max(base_time, s - timedelta(minutes=commute_mins))
+            if buffer_start < s and is_slot_free(buffer_start, int((s - buffer_start).total_seconds() // 60)):
+                add_slot(buffer_start, int((s - buffer_start).total_seconds() // 60))
+                planned_routines.append({
+                    "task": {
+                        "title": f"Commute to {t.get('title', 'Event')}",
+                        "priority": "Medium",
+                        "energy_requirement": "Low",
+                        "is_fixed_time": False,
+                        "is_internal_logistic": True
+                    },
+                    "start": buffer_start,
+                    "end": s
+                })
+            if e + timedelta(minutes=commute_mins) <= end_of_day and is_slot_free(e, commute_mins):
+                rc_s, rc_e = add_slot(e, commute_mins)
+                planned_routines.append({
+                    "task": {
+                        "title": "Return Commute",
+                        "priority": "Medium",
+                        "energy_requirement": "Low",
+                        "is_fixed_time": False,
+                        "is_internal_logistic": True
+                    },
+                    "start": rc_s,
+                    "end": rc_e
+                })
+
+        planned_routines.append({"task": t, "start": s, "end": e})
+        
+        # Inject Recovery Buffer
+        if (t.get("requires_focus") or energy == "High") and break_duration > 0:
+            if is_slot_free(e, break_duration):
+                bs, be = add_slot(e, break_duration)
+                planned_routines.append({
+                    "task": {
+                        "title": "Recovery Break",
+                        "priority": "Low",
+                        "energy_requirement": "Low",
+                        "is_fixed_time": False,
+                        "is_internal_logistic": True
+                    },
+                    "start": bs,
+                    "end": be
+                })
+        
+        # Add transition padding between different context groups to avoid jarring context switching
+        next_t = flexible_tasks[i+1] if i + 1 < len(flexible_tasks) else None
+        if next_t and next_t.get("context_group") != t.get("context_group"):
+            padding = 15 if personality != "Aggressive" else 0
+            current_search = e + timedelta(minutes=break_duration + padding)
         else:
-            raw_task = task_item
-            title_override = _make_title(raw_task)
-            priority = _guess_priority(raw_task)
-            estimated_time = _guess_duration(raw_task)
-        task_date = _assign_weekly_date(raw_task, task_index) if plan_scope == "weekly" else _extract_target_date(raw_task, plan_scope)
-        occupied_slots = occupied_slots_by_date.setdefault(task_date, [])
-        current_slot = current_slot_by_date.setdefault(task_date, datetime.combine(task_date, time(7, 0)))
+            current_search = e + timedelta(minutes=break_duration)
 
-        desired_start = _guess_start_time(raw_task, current_slot)
-        start_dt = _find_next_available_start(task_date, desired_start, estimated_time, occupied_slots)
-        end_dt = start_dt + timedelta(minutes=estimated_time)
-
-        occupied_slots.append((start_dt, end_dt))
-        occupied_slots.sort(key=lambda slot: slot[0])
-        current_slot_by_date[task_date] = end_dt + timedelta(minutes=15)
-
-        planned_routines.append(
+    planned_routines.sort(key=lambda r: r["start"])
+    
+    results = []
+    for r in planned_routines:
+        t_data = r["task"]
+        title = _clean_planner_title(t_data.get("title", ""))
+        priority = "Medium"
+        focus_mode_recommended = bool(t_data.get("focus_mode_recommended", False))
+            
+        desc = f"AI planned: {title}"
+        if title == "Recovery Break":
+            desc = "Mental recovery and pacing break to sustain cognitive energy."
+        elif "Commute" in title:
+            desc = "Automatically generated travel buffer time."
+            
+        results.append(
             AIPlannedRoutine(
-                title=title_override,
-                description=f"AI planned task based on user input: {raw_task}",
-                date=task_date,
-                start_time=start_dt.time().replace(second=0, microsecond=0),
-                end_time=end_dt.time().replace(second=0, microsecond=0),
+                title=title,
+                description=desc,
+                date=today_date,
+                start_time=r["start"].time().replace(second=0, microsecond=0),
+                end_time=r["end"].time().replace(second=0, microsecond=0),
                 priority=priority,
                 status="Pending",
-                estimated_time=estimated_time,
-                suggestion=_suggestion_for(raw_task, priority),
+                estimated_time=int((r["end"] - r["start"]).total_seconds() // 60),
+                focus_mode_recommended=focus_mode_recommended,
+                is_internal=bool(t_data.get("is_internal_logistic", False)),
+                suggestion=_suggestion_for(title, priority),
             )
         )
+    return results
 
-    return planned_routines
-
-
-def generate_heuristic_plan(input_text: str, plan_scope: str) -> AIGenerationResponse:
+def generate_heuristic_plan(input_text: str, plan_scope: str, start_after: datetime | None = None) -> AIGenerationResponse:
     tasks = _extract_tasks(input_text)
-    planned_routines = _build_schedule(tasks, plan_scope)
-
-    tips = []
-    if any("study" in task.lower() or "project" in task.lower() for task in tasks):
-        tips.append("Your focus-heavy work was moved earlier so you can use your strongest attention window first.")
-    if any("meeting" in task.lower() for task in tasks):
-        tips.append("Meeting blocks were anchored to the requested time so the rest of the plan works around them.")
-    if any("gym" in task.lower() or "workout" in task.lower() for task in tasks):
-        tips.append("Fitness was placed later in the day to avoid interrupting your highest-focus work blocks.")
-    if any("cook" in task.lower() or "food" in task.lower() for task in tasks):
-        tips.append("Meal-related tasks were kept close to realistic meal times so the plan feels easier to follow.")
-    tips.append("The schedule keeps buffer space between major tasks to reduce overlap and make the day more practical.")
-    tips = tips[:4]
-
+    ai_tasks = [
+        {
+            "title": t, 
+            "is_fixed_time": False, 
+            "requires_focus": False, 
+            "estimated_duration": _guess_duration(t),
+            "energy_requirement": "Medium",
+            "context_group": "General",
+            "focus_mode_recommended": False,
+            "confidence": 0.8
+        } 
+        for t in tasks
+    ]
+    planned_routines = _optimize_schedule(ai_tasks, plan_scope, start_after, "Balanced")
     return AIGenerationResponse(
-        summary=f"Built a clearer {plan_scope} routine with {len(planned_routines)} separated task blocks, practical timings, and relevant suggestions.",
-        productivity_tips=tips,
+        summary=f"Built a simple {plan_scope} routine.",
+        productivity_tips=["Fallback scheduling used."],
         routines=planned_routines,
     )
 
 
-async def generate_ai_plan(input_text: str, plan_scope: str) -> AIGenerationResponse:
+async def _analyze_with_groq(input_text: str, current_time: str | None = None) -> dict | None:
+    """First-pass AI analysis: extract tasks with confidence, travel tiers, and ambiguity flags."""
     today = date.today().isoformat()
-    fallback_tasks = _extract_tasks(input_text)
-    system_prompt = """
-    You are a senior productivity planner. Extract clean separate routine tasks from natural language.
+    time_context_prompt = ""
+    if current_time:
+        time_context_prompt = f"The user's current local time is: {current_time}. Schedule strictly AFTER this time."
 
-    Return JSON only with:
-    {
-      "tasks": [
-        {
-          "title": "short clean professional task title",
-          "source_text": "the original phrase with date/time words preserved",
-          "priority": "High|Medium|Low",
-          "estimated_time": 30-240
-        }
-      ],
-      "productivity_tips": ["short useful tip"]
-    }
+    system_prompt = f"""You are a Cognitive Scheduling Analyzer. Your job is to analyze the user's request and extract tasks
+with REALISTIC assessments. Be honest about your confidence — do NOT pretend to know things you don't.
 
-    Rules:
-    - Split every distinct action into its own task.
-    - Split by commas, and, then, also, next, plus, &, time mentions, repeated action verbs, and multiple goals.
-    - Never return one long combined task when multiple actions exist.
-    - Remove filler from title: today, tomorrow, morning, afternoon, evening, night, please, I need to, I have to.
-    - Keep date/time words only inside source_text so scheduling can use them.
-    - Titles must be short and clean, like "Study Python" or "Work on FastAPI Backend".
-    - Preserve prompt order unless a specific time makes a task naturally anchored.
-    - For "Work on FastAPI backend and work on frontend Swagger UI", return two tasks.
-    """
+Output STRICT JSON matching this schema:
+{{
+  "has_actionable_intent": true/false,
+  "inferred_personality": "Balanced",
+  "personality_confidence": 0.9,
+  "schedule_density": "light|moderate|packed",
+  "tasks": [
+    {{
+      "title": "Short Clean Task Name",
+      "is_fixed_time": true/false,
+      "time_constraint": "HH:MM",
+      "estimated_duration": 60,
+      "requires_focus": true/false,
+      "requires_travel": true/false,
+      "travel_tier": "nearby|moderate|long_travel|unknown",
+      "can_be_interrupted": true/false,
+      "ideal_time_of_day": "morning|afternoon|evening|night|any",
+      "energy_requirement": "High|Medium|Low",
+      "context_group": "Development",
+      "focus_mode_recommended": true/false,
+      "is_internal_logistic": true/false,
+      "confidence": 0.95,
+      "duration_confidence": "high|medium|low"
+    }}
+  ]
+}}
 
-    user_prompt = f"""
-    Today's date is {today}
+Rules:
+1. INTENT: If the input is random noise, set has_actionable_intent=false and return empty tasks.
+2. COGNITIVE LOAD: Accurately estimate 'energy_requirement'.
+3. CONTEXT GROUPS: Group similar tasks to minimize context switching.
+4. TIME CONSTRAINTS: Only output a time_constraint (HH:MM) if the user explicitly provided a time.
+5. NO HALLUCINATION: DO NOT invent tasks the user didn't mention.
+6. REALISM: For out-of-house events (movies=150-180min, gym=60-90min, flights=variable), estimate realistic durations and set requires_travel=true.
+7. TRAVEL TIER: Classify travel realistically:
+   - "nearby" = local grocery, nearby gym, neighborhood walk (15 min buffer)
+   - "moderate" = movie theater, restaurant, shopping mall (30 min buffer)
+   - "long_travel" = airport, railway station, concert venue, intercity (60+ min buffer)
+   - "unknown" = you genuinely cannot determine distance from context
+8. INTERNAL LOGISTICS: Set `is_internal_logistic = true` ONLY for purely internal spacing tasks like "returning home", generic transitions, or passive movement. If it's a primary human activity (e.g., "Movie", "Dinner"), set it to `false`. "Flight to Delhi" is an event, so it's `false`. "Return home" is usually just logistical, so `true`.
+9. CONFIDENCE: Set confidence < 0.7 if the task is vague or ambiguous.
+10. DURATION CONFIDENCE: Set to "low" if you are unsure about the duration estimate.
+11. SCHEDULE DENSITY: Assess overall day load — "light" (1-3 easy tasks), "moderate" (4-6 tasks), "packed" (7+ tasks or many high-energy).
+12. {time_context_prompt}"""
 
-    Split this {plan_scope} routine request:
+    user_prompt = f"Today is {today}. Analyze this request:\n\n{input_text}"
 
-    {input_text}
-    """
+    return await _groq_chat_json_async(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.2,
+    )
+
+
+def _build_clarification_questions(parsed: dict, max_questions: int = 2) -> list[AIClarificationQuestion]:
+    """Build lightweight clarification questions based on AI analysis results. Max 2 questions."""
+    questions: list[AIClarificationQuestion] = []
+    tasks = parsed.get("tasks", [])
+
+    # 1. Travel clarification — ask for tasks that require travel to verify distance
+    for i, task in enumerate(tasks):
+        if len(questions) >= max_questions:
+            break
+        if task.get("requires_travel"):
+            title = task.get("title", "this activity")
+            questions.append(AIClarificationQuestion(
+                id=f"travel_{i}",
+                question=f"How far is the {title.lower()}?",
+                type="single_choice",
+                options=[
+                    AIClarificationOption(value="nearby", label="Nearby", emoji="🏠"),
+                    AIClarificationOption(value="moderate", label="Moderate Travel", emoji="🚗"),
+                    AIClarificationOption(value="long_travel", label="Long Travel", emoji="✈️"),
+                ],
+                task_title=title,
+                default_value="moderate",
+            ))
+
+    # 2. Personality suggestion — ask if schedule has multiple tasks
+    if len(questions) < max_questions:
+        density = parsed.get("schedule_density", "moderate")
+        personality = parsed.get("inferred_personality", "Balanced")
+        personality_conf = parsed.get("personality_confidence", 0.9)
+
+        if density in ("packed", "moderate"):
+            questions.append(AIClarificationQuestion(
+                id="personality",
+                question="How would you like to pace your schedule today?",
+                type="single_choice",
+                options=[
+                    AIClarificationOption(value="Balanced", label="Keep Balanced", emoji="⚖️"),
+                    AIClarificationOption(value="Aggressive", label="Tighter Schedule", emoji="⚡"),
+                    AIClarificationOption(value="Calm", label="Relaxed Pacing", emoji="🧘"),
+                ],
+                task_title=None,
+                default_value="Balanced",
+            ))
+        elif personality_conf < 0.7 and personality != "Balanced":
+            questions.append(AIClarificationQuestion(
+                id="personality",
+                question=f"You seem to prefer a {personality.lower()} pace. Keep it?",
+                type="single_choice",
+                options=[
+                    AIClarificationOption(value="Balanced", label="Keep Balanced", emoji="⚖️"),
+                    AIClarificationOption(value=personality, label=f"Use {personality}", emoji="✦"),
+                ],
+                task_title=None,
+                default_value="Balanced",
+            ))
+
+    # 3. Duration clarification for tasks where AI is somewhat uncertain
+    for i, task in enumerate(tasks):
+        if len(questions) >= max_questions:
+            break
+        if task.get("duration_confidence") == "low" or task.get("confidence", 1.0) < 0.85:
+            title = task.get("title", "this task")
+            est = task.get("estimated_duration", 60)
+            questions.append(AIClarificationQuestion(
+                id=f"duration_{i}",
+                question=f"How long is {title.lower()}?",
+                type="single_choice",
+                options=[
+                    AIClarificationOption(value=str(max(30, est // 2)), label=f"~{max(30, est // 2)} min", emoji="⏱️"),
+                    AIClarificationOption(value=str(est), label=f"~{est} min", emoji="⏱️"),
+                    AIClarificationOption(value=str(int(est * 1.5)), label=f"~{int(est * 1.5)} min", emoji="⏱️"),
+                ],
+                task_title=title,
+                default_value=str(est),
+            ))
+
+    return questions
+
+
+async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | None = None) -> AIAnalysisResponse:
+    """Phase 1: Analyze the user's request and determine if clarification is needed."""
+    start_after = None
+    if current_time:
+        try:
+            dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+            start_after = dt.replace(tzinfo=None)
+        except ValueError:
+            pass
+
+    parsed = await _analyze_with_groq(input_text, current_time)
+
+    if not parsed or not parsed.get("has_actionable_intent"):
+        if parsed and not parsed.get("has_actionable_intent"):
+            return AIAnalysisResponse(
+                needs_clarification=False,
+                result=AIGenerationResponse(
+                    summary="I couldn't find any actionable tasks in that request. Please try describing your plans clearly.",
+                    productivity_tips=[],
+                    routines=[],
+                ),
+            )
+        return AIAnalysisResponse(
+            needs_clarification=False,
+            result=generate_heuristic_plan(input_text, plan_scope, start_after),
+        )
+
+    # Build clarification questions
+    questions = _build_clarification_questions(parsed, max_questions=2)
+
+    if questions:
+        return AIAnalysisResponse(
+            needs_clarification=True,
+            clarifications=questions,
+        )
+
+    # High confidence — generate directly
+    groq_tasks = parsed.get("tasks", [])
+    personality = parsed.get("inferred_personality", "Balanced")
+    planned_routines = _optimize_schedule(groq_tasks, plan_scope, start_after, personality)
+
+    if planned_routines:
+        return AIAnalysisResponse(
+            needs_clarification=False,
+            result=AIGenerationResponse(
+                summary=f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus.",
+                productivity_tips=[
+                    "Tasks were grouped by context to minimize mental switching.",
+                    "Recovery breaks were automatically injected after intense focus blocks.",
+                    "Your schedule respects your natural cognitive energy levels."
+                ],
+                routines=planned_routines,
+            ),
+        )
+
+    return AIAnalysisResponse(
+        needs_clarification=False,
+        result=generate_heuristic_plan(input_text, plan_scope, start_after),
+    )
+
+
+async def generate_ai_plan(input_text: str, plan_scope: str, current_time: str | None = None, clarifications: dict[str, str] | None = None) -> AIGenerationResponse:
+    """Phase 2: Generate the schedule, optionally applying user clarifications."""
+    today = date.today().isoformat()
+    start_after = None
+    time_context_prompt = ""
+    if current_time:
+        try:
+            dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+            start_after = dt.replace(tzinfo=None)
+        except ValueError:
+            pass
+        time_context_prompt = f"The user's current local time is: {current_time}. Schedule strictly AFTER this time."
+
+    system_prompt = f"""You are a Cognitive Scheduling Assistant. You schedule tasks based on human energy, mental fatigue, context switching, and realistic flow.
+Analyze the user's natural language request and extract tasks with deep psychological reasoning.
+
+Output STRICT JSON matching this schema:
+{{
+  "has_actionable_intent": true/false,
+  "inferred_personality": "Balanced",
+  "tasks": [
+    {{
+      "title": "Short Clean Task Name",
+      "is_fixed_time": true/false,
+      "time_constraint": "HH:MM",
+      "estimated_duration": 60,
+      "requires_focus": true/false,
+      "requires_travel": true/false,
+      "travel_tier": "nearby|moderate|long_travel",
+      "can_be_interrupted": true/false,
+      "ideal_time_of_day": "morning|afternoon|evening|night|any",
+      "energy_requirement": "High|Medium|Low",
+      "context_group": "Development",
+      "focus_mode_recommended": true/false,
+      "is_internal_logistic": true/false,
+      "confidence": 0.95
+    }}
+  ]
+}}
+
+Rules:
+1. INTENT: If the input is random noise, set has_actionable_intent=false and return an empty tasks array.
+2. COGNITIVE LOAD: Accurately estimate 'energy_requirement'.
+3. CONTEXT: Assign the same 'context_group' string to similar tasks to minimize context switching.
+4. TIME CONSTRAINTS: Only output a time_constraint (HH:MM) if the user explicitly provided a time.
+5. NO HALLUCINATION: DO NOT invent tasks the user didn't mention.
+6. REALISM: For out-of-house events (movies=150-180min, gym=60-90min), estimate realistic durations and set requires_travel=true.
+7. TRAVEL TIER: "nearby" (15min buffer), "moderate" (30min buffer), "long_travel" (60min buffer).
+8. INTERNAL LOGISTICS: Set `is_internal_logistic = true` ONLY for purely internal spacing tasks like "returning home", generic transitions, or passive movement. If it's a primary human activity (e.g., "Movie", "Dinner"), set it to `false`. "Flight to Delhi" is an event, so it's `false`. "Return home" is usually just logistical, so `true`.
+9. {time_context_prompt}"""
+
+    user_prompt = f"Today is {today}. Parse this request:\n\n{input_text}"
 
     parsed = await _groq_chat_json_async(
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.3,
+        temperature=0.2,
     )
-    if parsed:
-        raw_items = parsed.get("tasks") or []
-        groq_tasks: list[dict] = []
-        seen_titles: set[str] = set()
-        for item in raw_items:
-            title = _clean_planner_title(str(item.get("title") or item.get("task") or ""))
-            if not title or title.lower() in seen_titles:
-                continue
-            seen_titles.add(title.lower())
-            groq_tasks.append({
-                "title": title,
-                "source_text": str(item.get("source_text") or item.get("raw_text") or item.get("context") or title),
-                "priority": item.get("priority") or _guess_priority(title),
-                "estimated_time": item.get("estimated_time") or _guess_duration(title),
-            })
 
-        if groq_tasks:
-            planned_routines = _build_schedule(groq_tasks[:8], plan_scope)
-            tips = parsed.get("productivity_tips") or [
-                "The routine was split into clear action blocks so each item is easier to complete."
-            ]
+    if parsed and parsed.get("has_actionable_intent"):
+        groq_tasks = parsed.get("tasks", [])
+        personality = parsed.get("inferred_personality", "Balanced")
+
+        # Apply user clarifications
+        if clarifications:
+            if "personality" in clarifications:
+                personality = clarifications["personality"]
+            for i, task in enumerate(groq_tasks):
+                dur_key = f"duration_{i}"
+                if dur_key in clarifications:
+                    try:
+                        task["estimated_duration"] = int(clarifications[dur_key])
+                    except ValueError:
+                        pass
+
+        # Build travel overrides from clarifications
+        travel_overrides: dict[int, str] = {}
+        if clarifications:
+            for key, value in clarifications.items():
+                if key.startswith("travel_"):
+                    try:
+                        idx = int(key.split("_")[1])
+                        travel_overrides[idx] = value
+                    except (ValueError, IndexError):
+                        pass
+
+        planned_routines = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, travel_overrides=travel_overrides or None)
+        
+        if planned_routines:
             return AIGenerationResponse(
-                summary=f"Built a Groq-powered {plan_scope} routine with {len(planned_routines)} clean task blocks.",
-                productivity_tips=[str(tip) for tip in tips[:4]],
+                summary=f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus.",
+                productivity_tips=[
+                    "Tasks were grouped by context to minimize mental switching.",
+                    "Recovery breaks were automatically injected after intense focus blocks.",
+                    "Your schedule respects your natural cognitive energy levels."
+                ],
                 routines=planned_routines,
             )
 
-    return generate_heuristic_plan(input_text, plan_scope)
+    if parsed and not parsed.get("has_actionable_intent"):
+        return AIGenerationResponse(
+            summary="I couldn't find any actionable tasks in that request. Please try describing your plans clearly.",
+            productivity_tips=[],
+            routines=[],
+        )
 
+    return generate_heuristic_plan(input_text, plan_scope, start_after)
 
 def generate_workspace_ai_tasks(
     prompt: str,
     project_name: str = "Team Space",
     assignee: str | None = None,
+    available_projects: list[str] | None = None,
+    available_members: list[str] | None = None,
 ) -> list[WorkspaceAIGeneratedTask]:
     voice_corrections = {
         r"\bbacon\b": "backend",
@@ -830,34 +1280,73 @@ def generate_workspace_ai_tasks(
             if priority not in {"Low", "Medium", "High"}:
                 priority = "Medium"
             description = str(item.get("description") or item.get("quote") or task_quote(title)).strip()
+
+            guessed_project = item.get("project")
+            guessed_assignee = item.get("assignee")
+
+            proj = project_name
+            if guessed_project and available_projects:
+                matched_proj = next((p for p in available_projects if p.lower() == str(guessed_project).strip().lower()), None)
+                if matched_proj:
+                    proj = matched_proj
+                elif str(guessed_project).strip().lower() == "team space":
+                    proj = "Team Space"
+
+            ass = assignee or "Unassigned"
+            if guessed_assignee and available_members:
+                matched_ass = next((m for m in available_members if m.lower() == str(guessed_assignee).strip().lower()), None)
+                if matched_ass:
+                    ass = matched_ass
+                elif str(guessed_assignee).strip().lower() == "unassigned":
+                    ass = "Unassigned"
+
             normalized_items.append(
                 WorkspaceAIGeneratedTask(
                     title=clean_main_task(title)[:120],
                     description=description[:220],
-                    assignee=assignee or "Unassigned",
+                    assignee=ass,
                     priority=priority,
                     status="Todo",
                     due_date=date.today() if due_today else date.today() + timedelta(days=index),
                     progress=0,
-                    project_name=project_name,
+                    project_name=proj,
                 )
             )
         return normalized_items
+
+    system_content = (
+        "You are a senior productivity assistant. Extract only real actionable tasks from natural text "
+        "across software, office work, study, home routines, fitness, shopping, meetings, travel, and "
+        "mixed personal tasks. Remove filler like manager said, I need to, please do, can you help, and "
+        "today I want. Create exactly as many main tasks as the user mentioned, up to 5. Do not create "
+        "subtasks or step-by-step breakdown. Each description must be one short premium quote related "
+        "to the task type, never repeat the task title, and never use generic completion filler. "
+    )
+
+    if available_projects or available_members:
+        system_content += "\nYou must classify each task to a specific project and assign it to a team member if mentioned.\n"
+        if available_projects:
+            system_content += f"Available Projects: {json.dumps(available_projects)}. "
+            system_content += "If a task mentions or relates to one of these projects, set its 'project' field to that exact project name. If none match, use 'Team Space'.\n"
+        if available_members:
+            system_content += f"Available Members: {json.dumps(available_members)}. "
+            system_content += "If a task mentions or relates to one of these members, set its 'assignee' field to that exact member name. If none match, use 'Unassigned'.\n"
+
+        system_content += (
+            "Return JSON only: {\"tasks\":[{\"title\":\"...\",\"description\":\"short smart quote\","
+            "\"priority\":\"Low|Medium|High\",\"project\":\"...\",\"assignee\":\"...\"}]}"
+        )
+    else:
+        system_content += (
+            "Return JSON only: {\"tasks\":[{\"title\":\"...\",\"description\":\"short smart quote\","
+            "\"priority\":\"Low|Medium|High\"}]}"
+        )
 
     groq_result = _groq_chat_json(
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "You are a senior productivity assistant. Extract only real actionable tasks from natural text "
-                    "across software, office work, study, home routines, fitness, shopping, meetings, travel, and "
-                    "mixed personal tasks. Remove filler like manager said, I need to, please do, can you help, and "
-                    "today I want. Create exactly as many main tasks as the user mentioned, up to 5. Do not create "
-                    "subtasks or step-by-step breakdown. Each description must be one short premium quote related "
-                    "to the task type, never repeat the task title, and never use generic completion filler. "
-                    "Return JSON only: {\"tasks\":[{\"title\":\"...\",\"description\":\"short smart quote\","
-                    "\"priority\":\"Low|Medium|High\"}]}"
-                ),
+                "content": system_content,
             },
             {"role": "user", "content": prompt_clean},
         ],

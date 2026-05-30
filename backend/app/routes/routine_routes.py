@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from fastapi import Body
 from .. import crud, schemas
-from ..ai_engine import generate_ai_plan, transcribe_audio_with_groq
+from ..ai_engine import generate_ai_plan, analyze_ai_plan, transcribe_audio_with_groq
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
@@ -66,7 +66,47 @@ async def generate_routine(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ai_plan = await generate_ai_plan(payload.input_text, payload.plan_scope)
+    ai_plan = await generate_ai_plan(payload.input_text, payload.plan_scope, getattr(payload, "current_time", None))
+    # Save the generated routines to the database
+    for r in ai_plan.routines:
+        routine_create = schemas.RoutineCreate(**r.model_dump())
+        crud.create_routine(db, current_user.id, routine_create)
+    return ai_plan
+
+
+@router.post("/ai/analyze", response_model=schemas.AIAnalysisResponse)
+async def ai_analyze(
+    payload: schemas.AIGenerationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Phase 1: Analyze the user's request. Returns clarification questions or final routines."""
+    analysis = await analyze_ai_plan(payload.input_text, payload.plan_scope, getattr(payload, "current_time", None))
+    # If no clarification needed and we have a result, save routines to DB
+    if not analysis.needs_clarification and analysis.result:
+        for r in analysis.result.routines:
+            routine_create = schemas.RoutineCreate(**r.model_dump())
+            crud.create_routine(db, current_user.id, routine_create)
+    return analysis
+
+
+@router.post("/ai/generate-with-clarifications", response_model=schemas.AIGenerationResponse)
+async def ai_generate_with_clarifications(
+    payload: schemas.AIGenerationWithClarifications,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Phase 2: Generate schedule with user-provided clarification answers."""
+    ai_plan = await generate_ai_plan(
+        payload.input_text,
+        payload.plan_scope,
+        payload.current_time,
+        clarifications=payload.clarifications,
+    )
+    # Save the generated routines to the database
+    for r in ai_plan.routines:
+        routine_create = schemas.RoutineCreate(**r.model_dump())
+        crud.create_routine(db, current_user.id, routine_create)
     return ai_plan
 
 
