@@ -9,43 +9,56 @@ import {
   Rocket,
   Sparkles,
   UserRound,
+  UsersRound,
 } from "lucide-react";
 import Footer from "@/components/Footer";
 import Navbar from "@/components/Navbar";
 
-const teamMembers = [
+const leadershipMembers = [
+  {
+    role: "CEO, FlyersSoft",
+    name: "Uday Kanth",
+    description:
+      "Provides leadership, mentorship, and opportunities that empower aspiring developers and innovative projects to grow and succeed.",
+    icon: UserRound,
+    image: "/team/uday-kanth.jpg",
+  },
   {
     role: "Project Manager",
     name: "Krishna Kompalli",
-    description: "Guides planning, coordination, and delivery across the Routinely product.",
+    description:
+      "Leads project planning, coordination, and execution while ensuring smooth collaboration and timely delivery of project goals.",
     icon: UserRound,
     image: "/team/krishna-kompalli.jpg",
   },
+];
+
+const coreTeamMembers = [
   {
     role: "Backend Engineer",
     name: "Meghana Chodiboyina",
-    description: "Builds secure APIs, databases, and server-side systems that power the platform.",
+    description: "Builds secure APIs, databases, and scalable server-side systems that power the platform.",
     icon: Database,
     image: "/team/meghana-chodiboyina.jpg",
   },
   {
     role: "AI Engineer",
     name: "Pavan Kumar Duddi",
-    description: "Builds AI-powered features for automation and intelligent planning.",
+    description: "Develops AI-powered features and intelligent automation solutions to enhance productivity.",
     icon: Bot,
     image: "/team/pavan-kumar-duddi.jpg",
   },
   {
     role: "UI/UX Designer",
     name: "Prakhyath Sai Ponduru",
-    description: "Designs intuitive, user-friendly experiences and modern interfaces.",
+    description: "Designs intuitive, user-friendly, and visually appealing experiences that improve usability.",
     icon: PenTool,
     image: "/team/prakhyath-sai-ponduru.jpg",
   },
   {
     role: "Frontend Engineer",
     name: "Pavithra Gopinath",
-    description: "Creates responsive, interactive, and polished user interfaces across devices.",
+    description: "Creates responsive, interactive, and engaging user interfaces across devices.",
     icon: Monitor,
     image: "/team/pavithra.jpg",
   },
@@ -112,7 +125,7 @@ export default function AboutPage() {
           </div>
         </section>
 
-        <section className="section-sm" style={{ background: "var(--bg)" }}>
+        <section id="team" className="section-sm" style={{ background: "var(--bg)" }}>
           <div className="container">
             <div style={{ marginBottom: "2rem" }}>
               <div
@@ -134,72 +147,195 @@ export default function AboutPage() {
               </p>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-                gap: "clamp(1.25rem, 2.5vw, 2rem)",
-                alignItems: "start",
-              }}
-            >
-              {teamMembers.map((member, index) => {
-                const RoleIcon = member.icon;
+            <div>
+              <div
+                className="about-team-heading"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.7rem",
+                  color: "var(--orange)",
+                  marginBottom: "1.25rem",
+                }}
+              >
+                <UserRound size={24} strokeWidth={1.8} />
+                <span className="caption" style={{ color: "var(--text)", letterSpacing: "0.08em" }}>
+                  Leadership
+                </span>
+              </div>
 
-                return (
-                  <article
-                    className="anim-fade-up"
-                    key={`${member.role}-${member.name}`}
-                    style={{
-                      animationDelay: `${index * 0.06}s`,
-                    }}
-                  >
-                    <img
-                      alt={`${member.name} profile`}
-                      src={member.image}
-                      style={{
-                        width: "100%",
-                        aspectRatio: "1 / 1",
-                        objectFit: "cover",
-                        objectPosition: "center top",
-                        borderRadius: 8,
-                        marginBottom: "1.35rem",
-                        boxShadow: "0 22px 46px rgba(0,0,0,0.34)",
-                      }}
-                    />
+              <div
+                className="about-leadership-grid"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+                  gap: "clamp(1.5rem, 5vw, 4rem)",
+                  marginBottom: "3.5rem",
+                }}
+              >
+                {leadershipMembers.map((member, index) => {
+                  const RoleIcon = member.icon;
 
-                    <div
+                  return (
+                    <article
+                      className="anim-fade-up about-leadership-card"
+                      key={`${member.role}-${member.name}`}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.65rem",
-                        color: "var(--orange)",
-                        marginBottom: "0.95rem",
+                        display: "grid",
+                        gridTemplateColumns: "minmax(180px, 240px) 1fr",
+                        gap: "1.4rem",
+                        alignItems: "start",
+                        animationDelay: `${index * 0.06}s`,
                       }}
                     >
-                      <RoleIcon size={28} strokeWidth={1.8} />
-                      <span className="label" style={{ fontSize: "0.95rem", color: "var(--orange)" }}>
-                        {member.role}
-                      </span>
-                    </div>
-                    <h3
-                      className="h3"
+                      <img
+                        className="about-leadership-photo"
+                        alt={`${member.name} profile`}
+                        src={member.image}
+                        style={{
+                          width: "100%",
+                          aspectRatio: "1 / 1",
+                          objectFit: "cover",
+                          objectPosition:
+                            member.name === "Krishna Kompalli" ? "center -16px" : "center top",
+                          borderRadius: 8,
+                          boxShadow: "0 22px 46px rgba(0,0,0,0.34)",
+                        }}
+                      />
+                      <div className="about-leadership-copy">
+                        <div
+                          className="about-leadership-role-row"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.55rem",
+                            color: "var(--orange)",
+                            marginBottom: "0.65rem",
+                          }}
+                        >
+                          <RoleIcon size={22} strokeWidth={1.8} />
+                          <span className="label about-leadership-role" style={{ fontSize: "0.92rem", color: "var(--orange)" }}>
+                            {member.role}
+                          </span>
+                        </div>
+                        <h3
+                          className="h3 about-leadership-name"
+                          style={{
+                            fontSize: "clamp(1.35rem, 2vw, 1.8rem)",
+                            marginBottom: "0.9rem",
+                            color: "var(--text)",
+                            lineHeight: 1.16,
+                            whiteSpace: "nowrap",
+                            wordSpacing: "0.08em",
+                          }}
+                        >
+                          {member.name}
+                        </h3>
+                        <p className="body-md text-muted about-leadership-description" style={{ color: "#d3d3dc", lineHeight: 1.75 }}>
+                          {member.description}
+                        </p>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <div
+                className="about-team-heading"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.7rem",
+                  color: "var(--orange)",
+                  marginBottom: "1.25rem",
+                }}
+              >
+                <UsersRound size={24} strokeWidth={1.8} />
+                <span className="caption" style={{ color: "var(--text)", letterSpacing: "0.08em" }}>
+                  Core Team
+                </span>
+              </div>
+
+              <div
+                className="about-core-grid"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                  gap: "clamp(1rem, 2.4vw, 2rem)",
+                  alignItems: "start",
+                }}
+              >
+                {coreTeamMembers.map((member, index) => {
+                  const RoleIcon = member.icon;
+
+                  return (
+                    <article
+                      className="anim-fade-up about-core-card"
+                      key={`${member.role}-${member.name}`}
                       style={{
-                        fontSize: "clamp(1rem, 1.25vw, 1.18rem)",
-                        marginBottom: "0.65rem",
-                        color: "var(--text)",
-                        lineHeight: 1.2,
-                        whiteSpace: "nowrap",
-                        wordSpacing: "0.08em",
+                        animationDelay: `${(index + leadershipMembers.length) * 0.06}s`,
                       }}
                     >
-                      {member.name}
-                    </h3>
-                    <p className="body-md text-muted" style={{ color: "#d3d3dc", lineHeight: 1.7 }}>
-                      {member.description}
-                    </p>
-                  </article>
-                );
-              })}
+                      <img
+                        className="about-core-photo"
+                        alt={`${member.name} profile`}
+                        src={member.image}
+                        style={{
+                          width: "82%",
+                          aspectRatio: "1 / 1",
+                          objectFit: "cover",
+                          objectPosition:
+                            member.name === "Meghana Chodiboyina"
+                              ? "center 26%"
+                              : member.name === "Pavan Kumar Duddi"
+                                ? "center 4%"
+                                : "center top",
+                          imageRendering: "auto",
+                          filter: "none",
+                          borderRadius: 8,
+                          display: "block",
+                          marginBottom: "0.8rem",
+                          boxShadow: "0 16px 34px rgba(0,0,0,0.3)",
+                        }}
+                      />
+
+                      <div className="about-core-copy">
+                        <div
+                          className="about-core-role-row"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.45rem",
+                            color: "var(--orange)",
+                            marginBottom: "0.45rem",
+                          }}
+                        >
+                          <RoleIcon size={19} strokeWidth={1.8} />
+                          <span className="label about-core-role" style={{ fontSize: "0.9rem", color: "var(--orange)" }}>
+                            {member.role}
+                          </span>
+                        </div>
+                        <h3
+                          className="h3 about-core-name"
+                          style={{
+                            fontSize: "clamp(1.08rem, 1.28vw, 1.28rem)",
+                            marginBottom: "0.45rem",
+                            color: "var(--text)",
+                            lineHeight: 1.2,
+                            whiteSpace: "nowrap",
+                            wordSpacing: "0.08em",
+                          }}
+                        >
+                          {member.name}
+                        </h3>
+                        <p className="body-sm text-muted about-core-description" style={{ color: "#d3d3dc", fontSize: "0.9rem", lineHeight: 1.65 }}>
+                          {member.description}
+                        </p>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </section>
