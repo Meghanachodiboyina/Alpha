@@ -1,41 +1,108 @@
 import Link from "next/link";
+import { ChevronRight, Mail } from "lucide-react";
+
+const productLinks = [
+  { label: "Features", href: "/#features" },
+  { label: "How it works", href: "/#how" },
+  { label: "Pricing", href: "/pricing" },
+  { label: "Download App", href: "/#download" },
+];
+
+const featureLinks = [
+  { label: "AI Routine Builder", href: "/#features" },
+  { label: "Smart Scheduling", href: "/#features" },
+  { label: "Goal Tracking", href: "/#features" },
+  { label: "Analytics", href: "/#features" },
+];
+
+const companyLinks = [
+  { label: "About Us", href: "/about" },
+  { label: "Our Team", href: "/about#team" },
+  { label: "Contact Us", href: "mailto:airoutinecreator@gmail.com" },
+];
+
+const connectLinks = [
+  { label: "airoutinecreator@gmail.com", href: "mailto:airoutinecreator@gmail.com", icon: "mail" },
+  { label: "LinkedIn", href: "https://www.linkedin.com", icon: "in" },
+  { label: "GitHub", href: "https://github.com", icon: "gh" },
+];
+
+function FooterColumn({
+  title,
+  links,
+}: {
+  title: string;
+  links: Array<{ label: string; href: string }>;
+}) {
+  return (
+    <div className="footer-column">
+      <h3>{title}</h3>
+      <nav aria-label={title}>
+        {links.map((link) => (
+          <Link className="footer-link" href={link.href} key={link.label}>
+            <ChevronRight size={17} strokeWidth={2} />
+            <span>{link.label}</span>
+          </Link>
+        ))}
+      </nav>
+    </div>
+  );
+}
 
 export default function Footer() {
   return (
-    <footer style={{ borderTop: "1px solid var(--border)", paddingBlock: "3rem" }}>
-      <div className="container">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "3rem", marginBottom: "3rem" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-              <div className="nav-logo-icon">
-                <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M10 3L17 7v6l-7 4-7-4V7l7-4z" stroke="white" strokeWidth="1.5" strokeLinejoin="round"/><circle cx="10" cy="10" r="2" fill="white"/></svg>
-              </div>
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1.125rem" }}>Routinely</span>
-            </div>
-            <p className="body-sm text-muted">The AI-powered productivity OS for modern teams.</p>
+    <footer className="site-footer">
+      <div className="site-footer-inner">
+        <div className="footer-main">
+          <div className="footer-brand-block">
+            <Link href="/" className="footer-brand" aria-label="Routinely home">
+              <span className="footer-brand-icon">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <circle cx="10" cy="10" r="6.6" stroke="white" strokeWidth="1.6" />
+                  <circle cx="10" cy="10" r="2.4" fill="white" />
+                  <path d="M10 1.8v3M10 15.2v3M1.8 10h3M15.2 10h3" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              </span>
+              <span>Routinely</span>
+            </Link>
+            <p>The AI-powered productivity OS for modern teams.</p>
           </div>
-          {[
-            { title: "Product", links: ["Features", "How it works", "Changelog"] },
-            { title: "Company", links: ["About", "Blog", "Careers", "Press"] },
-            { title: "Legal", links: ["Privacy", "Terms", "Security", "Cookies"] },
-          ].map(col => (
-            <div key={col.title}>
-              <div className="caption text-faint mb-4">{col.title}</div>
-              {col.links.map(l => (
-                <div key={l} style={{ marginBottom: "0.625rem" }}>
-                  <Link href={l === 'Features' ? '#features' : l === 'How it works' ? '#how' : '#'} className="body-sm text-muted">
-                    {l}
-                  </Link>
-                </div>
-              ))}
-            </div>
-          ))}
+
+          <FooterColumn title="Product" links={productLinks} />
+          <FooterColumn title="Features" links={featureLinks} />
+          <FooterColumn title="Company" links={companyLinks} />
+
+          <div className="footer-column">
+            <h3>Connect</h3>
+            <nav aria-label="Connect">
+              {connectLinks.map((link) => {
+                return (
+                  <a
+                    className="footer-connect-link"
+                    href={link.href}
+                    key={link.label}
+                    rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                    target={link.href.startsWith("http") ? "_blank" : undefined}
+                  >
+                    {link.icon === "mail" ? (
+                      <Mail size={20} strokeWidth={1.9} />
+                    ) : (
+                      <span className="footer-social-mark">{link.icon}</span>
+                    )}
+                    <span>{link.label}</span>
+                  </a>
+                );
+              })}
+              <a className="footer-connect-link" href="https://x.com" rel="noopener noreferrer" target="_blank">
+                <span className="footer-x-icon">X</span>
+                <span>X (Twitter)</span>
+              </a>
+            </nav>
+          </div>
         </div>
-        <div style={{ borderTop: "1px solid var(--border)", paddingTop: "2rem", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
-          <p className="body-sm text-faint">© {new Date().getFullYear()} Routinely. All rights reserved.</p>
-          <div style={{ display: "flex", gap: "1.5rem" }}>
-            {["Twitter","LinkedIn","GitHub"].map(s => <a key={s} href="#" className="body-sm text-muted">{s}</a>)}
-          </div>
+
+        <div className="footer-bottom">
+          <p>&copy; {new Date().getFullYear()} Routinely. All rights reserved.</p>
         </div>
       </div>
     </footer>

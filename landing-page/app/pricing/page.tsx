@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import Footer from "@/components/Footer";
 import Navbar from "@/components/Navbar";
@@ -12,7 +13,7 @@ const plans = [
     price: "$0",
     period: "/mo",
     features: ["AI Routine Builder (Basic)", "Up to 5 Goals", "Mobile App Access"],
-    action: "Get Started",
+    action: "Start Free Trail",
   },
   {
     id: "pro",
@@ -26,20 +27,13 @@ const plans = [
       "Smart Rescheduling",
       "Deep Analytics",
     ],
-    action: "Start Free Trial",
+    action: "Upgrade to Pro",
     recommended: true,
-  },
-  {
-    id: "team",
-    name: "Team",
-    price: "$10",
-    period: "/user/mo",
-    features: ["Everything in Pro", "Shared Workspaces", "Team Velocity Tracking", "Priority Support"],
-    action: "Contact Sales",
   },
 ];
 
 export default function PricingPage() {
+  const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState("pro");
   const selectPlan = (planId: string) => setSelectedPlan(planId);
 
@@ -90,9 +84,12 @@ export default function PricingPage() {
             className="pricing-grid"
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-              gap: "2rem",
+              gridTemplateColumns: "repeat(2, minmax(260px, 360px))",
+              gap: "1.5rem",
               alignItems: "stretch",
+              justifyContent: "center",
+              maxWidth: 820,
+              marginInline: "auto",
             }}
           >
             {plans.map((plan) => {
@@ -194,6 +191,10 @@ export default function PricingPage() {
                     className={`btn ${isSelected ? "btn-primary" : "btn-ghost"}`}
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (plan.id === "pro") {
+                        router.push("/checkout");
+                        return;
+                      }
                       selectPlan(plan.id);
                     }}
                     style={{ width: "100%", padding: "1rem" }}
