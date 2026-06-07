@@ -7,7 +7,7 @@ export default function TrustedBy() {
     <section className="py-16 border-t bg-gray-50">
       <div className="container">
         <p className="text-center text-10 font-bold uppercase tracking-wider text-muted mb-12 opacity-60">
-          Trusted by teams at
+          Trusted by builders at
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-16 gap-y-10 opacity-40 grayscale hover-grayscale-0 transition-all duration-700">
            {companies.map((company) => (

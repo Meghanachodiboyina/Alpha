@@ -1,69 +1,82 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Animated } from 'react-native';
+/**
+ * PremiumLoader.tsx
+ *
+ * Exports:
+ *  - SplashAnimation     — Premium Routinely orbit logo construction animation.
+ *  - DashboardSkeleton   — Alias → SplashAnimation wrapper
+ *  - ClickUpStyleLoader  — Legacy 3-dot loader
+ *  - FadeInView          — Fade-in wrapper for content reveal
+ */
+
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, Animated, Easing } from 'react-native';
+import Svg, {
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Stop,
+  Path,
+  Circle,
+} from 'react-native-svg';
 import { useTheme } from '@/context/ThemeContext';
 
+import SplashAnimation from './SplashAnimation';
+
+// ─────────────────────────────────────────────────────────────────
+// DASHBOARD SKELETON (In-app loading)
+// ─────────────────────────────────────────────────────────────────
+export const appState = { justLoggedIn: false };
+export const DashboardSkeleton = (props: any) => <ClickUpStyleLoader {...props} />;
+
+// ── Legacy aliases ────────────────────────────────────────────────
+export const RoutinesSkeleton  = DashboardSkeleton;
+export const WorkspaceSkeleton = DashboardSkeleton;
+export const AnalyticsSkeleton = DashboardSkeleton;
+
+// ── Legacy 3-dot bounce loader ────────────────────────────────────
 export const ClickUpStyleLoader = () => {
-  const { theme, isDarkMode } = useTheme();
-  
+  const { theme } = useTheme();
   const anim1 = useRef(new Animated.Value(0)).current;
   const anim2 = useRef(new Animated.Value(0)).current;
   const anim3 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const createBounce = (anim: Animated.Value, delay: number) => {
-      return Animated.sequence([
+    const bounce = (a: Animated.Value, delay: number) =>
+      Animated.sequence([
         Animated.delay(delay),
         Animated.loop(
           Animated.sequence([
-            Animated.timing(anim, {
-              toValue: -12,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-            Animated.timing(anim, {
-              toValue: 0,
-              duration: 300,
-              useNativeDriver: true,
-            }),
+            Animated.timing(a, { toValue: -12, duration: 300, useNativeDriver: true }),
+            Animated.timing(a, { toValue: 0,   duration: 300, useNativeDriver: true }),
             Animated.delay(400),
           ])
-        )
+        ),
       ]);
-    };
-
-    Animated.parallel([
-      createBounce(anim1, 0),
-      createBounce(anim2, 150),
-      createBounce(anim3, 300),
-    ]).start();
+    Animated.parallel([bounce(anim1, 0), bounce(anim2, 150), bounce(anim3, 300)]).start();
   }, [anim1, anim2, anim3]);
-
-  const dotStyle = (anim: Animated.Value, color: string) => ({
-    width: 14,
-    height: 14,
-    borderRadius: 4, // Slight curve like ClickUp squares
-    backgroundColor: color,
-    transform: [{ translateY: anim }],
-  });
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center' }}>
       <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Animated.View style={dotStyle(anim1, theme.blue || '#3B82F6')} />
-        <Animated.View style={dotStyle(anim2, theme.purple || '#8B5CF6')} />
-        <Animated.View style={dotStyle(anim3, theme.orange || '#FF6B35')} />
+        {([anim1, anim2, anim3] as Animated.Value[]).map((a, i) => (
+          <Animated.View key={i} style={{
+            width: 14, height: 14, borderRadius: 4,
+            backgroundColor: [theme.blue, theme.purple, theme.orange][i] as string,
+            transform: [{ translateY: a }],
+          }} />
+        ))}
       </View>
     </View>
   );
 };
 
-// Export aliases so the other files don't need their imports changed
-export const DashboardSkeleton = ClickUpStyleLoader;
-export const RoutinesSkeleton = ClickUpStyleLoader;
-export const WorkspaceSkeleton = ClickUpStyleLoader;
-export const AnalyticsSkeleton = ClickUpStyleLoader;
-
-export const FadeInView = ({ children, style }: { children: React.ReactNode, style?: any }) => {
+// ── FadeInView ────────────────────────────────────────────────────
+export const FadeInView = ({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: any;
+}) => {
   const { theme } = useTheme();
   const opacity = useRef(new Animated.Value(0)).current;
 

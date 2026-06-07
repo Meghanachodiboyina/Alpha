@@ -42,7 +42,7 @@ export default function RadialMenuOverlay({ isOpen, onClose }: Props) {
   const actions = [
     { id: 'focus', label: 'Focus', icon: 'target', color: theme.red, route: '/focus-mode' },
     { id: 'analytics', label: 'Analytics', icon: 'bar-chart-2', color: theme.blue, route: '/(tabs)/analytics' },
-    { id: 'builder', label: 'AI Builder', icon: 'zap', color: theme.orange, route: '/(tabs)/ai-planner' },
+    { id: 'builder', label: 'AI Builder', icon: 'orbit', color: theme.orange, route: '/(tabs)/ai-planner' },
     { id: 'routine', label: 'Routine', icon: 'plus-circle', color: theme.green, route: '/(tabs)/routines' },
   ];
 
@@ -119,7 +119,11 @@ export default function RadialMenuOverlay({ isOpen, onClose }: Props) {
                   marginBottom: 10,
                 }}
               >
-                <Feather name={action.icon as any} size={24} color={action.color} />
+                {action.icon === 'orbit' ? (
+                  <Text style={{ fontSize: 28, color: action.color, marginBottom: 2 }}>✦</Text>
+                ) : (
+                  <Feather name={action.icon as any} size={24} color={action.color} />
+                )}
               </TouchableOpacity>
               
               {/* Clean, floating text label without background boxes */}

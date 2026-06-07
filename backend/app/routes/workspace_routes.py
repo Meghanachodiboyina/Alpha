@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
@@ -8,12 +8,15 @@ from ..ai_engine import generate_workspace_ai_tasks
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
+from ..rate_limiter import limiter
 
 router = APIRouter(tags=["Workspace"])
 
 
 @router.get("/workspace/tasks", response_model=list[schemas.WorkspaceTaskOut])
+@limiter.limit("60/minute")
 def list_workspace_tasks(
+    request: Request,
     project_name: str | None = Query(default=None),
     due_date: date | None = Query(default=None),
     assignee: str | None = Query(default=None),
@@ -40,7 +43,9 @@ def list_workspace_tasks(
 
 
 @router.get("/workspace/bootstrap", response_model=schemas.WorkspaceBootstrapResponse)
+@limiter.limit("60/minute")
 def get_workspace_bootstrap(
+    request: Request,
     project_name: str | None = Query(default=None),
     due_date: date | None = Query(default=None),
     assignee: str | None = Query(default=None),
@@ -89,7 +94,9 @@ def get_workspace_bootstrap(
 
 
 @router.get("/workspace/projects", response_model=list[schemas.WorkspaceProjectOut])
+@limiter.limit("60/minute")
 def list_workspace_projects(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -97,7 +104,9 @@ def list_workspace_projects(
 
 
 @router.post("/workspace/projects", response_model=schemas.WorkspaceProjectOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 def create_workspace_project(
+    request: Request,
     payload: schemas.WorkspaceProjectCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -106,7 +115,9 @@ def create_workspace_project(
 
 
 @router.delete("/workspace/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("60/minute")
 def delete_workspace_project(
+    request: Request,
     project_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -120,7 +131,9 @@ def delete_workspace_project(
 
 
 @router.post("/workspace/tasks", response_model=schemas.WorkspaceTaskOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 def create_workspace_task(
+    request: Request,
     payload: schemas.WorkspaceTaskCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -129,7 +142,9 @@ def create_workspace_task(
 
 
 @router.put("/workspace/tasks/{task_id}", response_model=schemas.WorkspaceTaskOut)
+@limiter.limit("60/minute")
 def update_workspace_task(
+    request: Request,
     task_id: int,
     payload: schemas.WorkspaceTaskUpdate,
     db: Session = Depends(get_db),
@@ -142,7 +157,9 @@ def update_workspace_task(
 
 
 @router.delete("/workspace/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("60/minute")
 def delete_workspace_task(
+    request: Request,
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -154,7 +171,9 @@ def delete_workspace_task(
 
 
 @router.post("/workspace/ai-generate", response_model=schemas.WorkspaceAIGenerateResponse)
+@limiter.limit("60/minute")
 def ai_generate_workspace_tasks(
+    request: Request,
     payload: schemas.WorkspaceAIGenerateRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -196,7 +215,9 @@ def ai_generate_workspace_tasks(
 
 
 @router.get("/workspace/ai-tasks", response_model=list[schemas.WorkspaceTaskOut])
+@limiter.limit("60/minute")
 def list_workspace_ai_tasks(
+    request: Request,
     project_name: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -205,7 +226,9 @@ def list_workspace_ai_tasks(
 
 
 @router.get("/workspace/ai-task-groups", response_model=list[schemas.WorkspaceAITaskGroupOut])
+@limiter.limit("60/minute")
 def list_workspace_ai_task_groups(
+    request: Request,
     project_name: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -214,7 +237,9 @@ def list_workspace_ai_task_groups(
 
 
 @router.get("/workspace/reports", response_model=schemas.WorkspaceReportOut)
+@limiter.limit("60/minute")
 def get_workspace_reports(
+    request: Request,
     project_name: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -223,7 +248,9 @@ def get_workspace_reports(
 
 
 @router.get("/workspace/settings", response_model=schemas.WorkspaceSettingsOut)
+@limiter.limit("60/minute")
 def get_workspace_settings(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -231,7 +258,9 @@ def get_workspace_settings(
 
 
 @router.put("/workspace/settings", response_model=schemas.WorkspaceSettingsOut)
+@limiter.limit("60/minute")
 def update_workspace_settings(
+    request: Request,
     payload: schemas.WorkspaceSettingsUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

@@ -54,7 +54,7 @@ const CenterFabButton = ({ isMenuOpen, onPress, theme }: any) => {
         transform: [{ rotate: spin }]
       }}>
         <Animated.View style={{ opacity: zapOpacity, position: 'absolute' }}>
-          <Feather name="zap" size={24} color="#fff" />
+          <Text style={{ fontSize: 26, color: '#fff', marginBottom: 2 }}>✦</Text>
         </Animated.View>
         <Animated.View style={{ opacity: plusOpacity, position: 'absolute' }}>
           <Feather name="plus" size={28} color="#fff" />

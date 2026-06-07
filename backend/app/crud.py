@@ -136,9 +136,31 @@ def update_routine(db: Session, db_routine: models.Routine, routine_update: sche
             db_routine.priority,
         )
 
+    if "start_time" in update_data and db_routine.start_time != update_data["start_time"]:
+        # User manually changed the time, let's learn this preference
+        new_time = update_data["start_time"]
+        if new_time:
+            time_str = new_time.strftime("%H:%M")
+            upsert_user_preference(db, db_routine.user_id, f"time_preference_{db_routine.title.lower()}", time_str)
+
     db.commit()
     db.refresh(db_routine)
     return db_routine
+
+def upsert_user_preference(db: Session, user_id: str, category: str, value: str):
+    db_pref = db.query(models.UserPreference).filter_by(user_id=user_id, category=category).first()
+    if db_pref:
+        db_pref.value = value
+        db_pref.updated_at = datetime.now(timezone.utc)
+    else:
+        db_pref = models.UserPreference(
+            user_id=user_id,
+            category=category,
+            value=value
+        )
+        db.add(db_pref)
+    db.commit()
+    return db_pref
 
 
 

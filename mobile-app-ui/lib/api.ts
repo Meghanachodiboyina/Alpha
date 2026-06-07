@@ -73,7 +73,12 @@ class ApiClient {
       };
     }
 
-    return response.json();
+    if (response.status === 204) {
+      return null as any;
+    }
+
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   }
 
   get<T = any>(path: string) {

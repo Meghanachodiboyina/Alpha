@@ -46,3 +46,5 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 uvicorn==0.34.2
 websockets==15.0.1
+slowapi==0.1.9
+alembic==1.13.1

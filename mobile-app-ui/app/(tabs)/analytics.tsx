@@ -33,7 +33,6 @@ export default function AnalyticsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
       fetchData();
     }, [])
   );

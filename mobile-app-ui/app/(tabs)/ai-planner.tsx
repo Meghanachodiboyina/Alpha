@@ -9,7 +9,7 @@ import api, { API_BASE_URL } from '../../lib/api';
 import { Radius, FontSize } from '@/constants/Colors';
 import { useTheme } from '@/context/ThemeContext';
 import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { ClickUpStyleLoader, FadeInView } from '../../components/PremiumLoader';
 import { supabase } from '@/lib/supabase';
 
@@ -414,92 +414,30 @@ function AiPlannerContent({ theme, s }: { theme: any, s: any }) {
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
+      {/* Top Navbar */}
+      <View style={[s.topNav, { justifyContent: 'flex-end' }]}>
+        <TouchableOpacity style={s.navIconBtn}>
+          <Feather name="clock" size={20} color={theme.text} />
+        </TouchableOpacity>
+      </View>
+
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
-          style={s.container}
-          contentContainerStyle={{ paddingBottom: 32 }}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Header */}
-          <View style={s.header}>
-            <View style={s.headerIcon}>
-              <Text style={{ fontSize: 24 }}>✦</Text>
-            </View>
-            <Text style={s.headerTitle}>AI Routine Builder</Text>
-            <Text style={s.headerSubtitle}>
-              Describe your tasks in plain language. AI builds an optimized routine—collaboratively.
-            </Text>
-          </View>
-
-          {/* Scope Selector */}
-          <View style={s.scopeRow}>
-            {(['today', 'week'] as const).map((scope) => (
-              <TouchableOpacity
-                key={scope}
-                style={[s.scopeBtn, planScope === scope && s.scopeBtnActive]}
-                onPress={() => setPlanScope(scope)}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.scopeText, planScope === scope && s.scopeTextActive]}>
-                  {scope === 'today' ? '📅 Today' : '📆 This Week'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Text Input */}
-          <View style={s.inputWrap}>
-            <TextInput
-              style={s.textArea}
-              placeholder={isRecording ? "Listening to your voice..." : "Tell me about your day... e.g. 'I need to study math, work on my project, go to the gym at 5 PM, and have dinner at 7'"}
-              placeholderTextColor={isRecording ? theme.orange : theme.text3}
-              multiline
-              numberOfLines={5}
-              textAlignVertical="top"
-              value={inputText}
-              onChangeText={setInputText}
-              editable={!showClarifications}
-            />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-              <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-                <TouchableOpacity 
-                  style={[s.micBtn, isRecording && s.micBtnRecording]} 
-                  onPress={isRecording ? stopRecording : startRecording}
-                >
-                  <Ionicons 
-                    name={isRecording ? "stop" : "pulse"} 
-                    size={18} 
-                    color={isRecording ? theme.red : theme.text2} 
-                  />
-                </TouchableOpacity>
-
-                {inputText.length > 0 && !showClarifications && (
-                  <TouchableOpacity onPress={() => setInputText('')} style={s.clearBtn}>
-                    <Ionicons name="close" size={16} color={theme.text3} />
-                    <Text style={{ fontSize: 13, color: theme.text3, fontWeight: '500' }}>Clear</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              <Text style={{ fontSize: 11, color: theme.text3 }}>{inputText.length}/500</Text>
-            </View>
-          </View>
-
-          {/* Clarification Section */}
-          {showClarifications && clarifications.length > 0 ? (
-            <View style={{ marginBottom: 20 }}>
+          {showClarifications ? (
+            <View style={{ flex: 1, marginTop: 20 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                <View style={{
-                  width: 28, height: 28, borderRadius: 8,
-                  backgroundColor: theme.orangeLight,
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
+                <View style={s.chatBubble}>
                   <Text style={{ fontSize: 14 }}>💬</Text>
                 </View>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, letterSpacing: -0.2 }}>
+                <Text style={s.chatBubbleTitle}>
                   Quick question{clarifications.length > 1 ? 's' : ''}
                 </Text>
               </View>
@@ -514,78 +452,82 @@ function AiPlannerContent({ theme, s }: { theme: any, s: any }) {
                 />
               ))}
 
-              {/* Generate with Preferences Button */}
               <TouchableOpacity
-                style={[s.generateBtn, loading && { opacity: 0.7 }]}
+                style={[s.generateBtnLarge, loading && { opacity: 0.7 }]}
                 onPress={handleGenerateWithClarifications}
                 disabled={loading}
-                activeOpacity={0.85}
               >
                 {loading ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <ActivityIndicator color="#fff" size="small" />
-                    <Text style={s.generateText}>Building your routine…</Text>
-                  </View>
+                  <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Text style={s.generateText}>✦ Generate with my preferences</Text>
+                  <Text style={s.generateTextLarge}>✦ Generate with my preferences</Text>
                 )}
               </TouchableOpacity>
 
-              {/* Skip link */}
-              <TouchableOpacity
-                onPress={handleSkipClarifications}
-                style={{ alignItems: 'center', marginTop: 12, paddingVertical: 8 }}
-                activeOpacity={0.6}
-              >
-                <Text style={{ fontSize: 13, color: theme.text3, fontWeight: '500' }}>
-                  Skip — use AI defaults
-                </Text>
+              <TouchableOpacity onPress={handleSkipClarifications} style={s.skipBtn}>
+                <Text style={s.skipBtnText}>Skip — use AI defaults</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            <>
-              {/* Suggestions */}
-              <Text style={s.suggestLabel}>💡 Try these</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
-                <View style={s.suggestRow}>
-                  {suggestions.map((sg, i) => (
-                    <TouchableOpacity
-                      key={i}
-                      style={s.suggestChip}
-                      onPress={() => setInputText(sg)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={s.suggestText} numberOfLines={2}>{sg}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+            <View style={s.emptyStateCentered}>
+              <Text style={s.orbitTitle}>
+                Orbit <Text style={{ color: theme.orange }}>✦</Text>
+              </Text>
+              <Text style={s.orbitSubtitle}>
+                Your AI planner for a better, balanced day.
+              </Text>
 
-              {/* Error */}
+              {/* Error Box */}
               {error ? (
                 <View style={s.errorBox}>
                   <Text style={s.errorText}>{error}</Text>
                 </View>
               ) : null}
-
-              {/* Generate Button */}
-              <TouchableOpacity
-                style={[s.generateBtn, loading && { opacity: 0.7 }]}
-                onPress={handleGenerate}
-                disabled={loading}
-                activeOpacity={0.85}
-              >
-                {loading ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <ActivityIndicator color="#fff" size="small" />
-                    <Text style={s.generateText}>Analyzing your request…</Text>
-                  </View>
-                ) : (
-                  <Text style={s.generateText}>✦ Generate Routine</Text>
-                )}
-              </TouchableOpacity>
-            </>
+            </View>
           )}
+
+          {/* Bottom Input Area */}
+          <View style={s.inputWrap}>
+            <TextInput
+              style={s.textArea}
+              placeholder={isRecording ? "Listening to your voice..." : "Tell me what you need to do..."}
+              placeholderTextColor={isRecording ? theme.orange : theme.text3}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              value={inputText}
+              onChangeText={setInputText}
+              editable={!showClarifications}
+            />
+            <View style={s.inputBottomRow}>
+              {/* Mic on Left */}
+              <TouchableOpacity 
+                style={[s.micBtn, isRecording && s.micBtnRecording]} 
+                onPress={isRecording ? stopRecording : startRecording}
+              >
+                <Ionicons 
+                  name={isRecording ? "stop" : "mic"} 
+                  size={16} 
+                  color={isRecording ? theme.red : theme.text} 
+                />
+              </TouchableOpacity>
+
+              {/* Plan my day button on Right */}
+              {!showClarifications && (
+                <TouchableOpacity
+                  style={[s.planBtn, (!inputText.trim() && !loading) && { opacity: 0.5 }]}
+                  onPress={handleGenerate}
+                  disabled={loading || !inputText.trim()}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={s.planBtnText}>Plan my day</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -593,71 +535,82 @@ function AiPlannerContent({ theme, s }: { theme: any, s: any }) {
 }
 
 const getStyles = (c: any) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: c.bg },
-  container: { flex: 1, paddingHorizontal: 20 },
-
-  header: { paddingTop: 8, marginBottom: 28, alignItems: 'center' },
-  headerIcon: {
-    width: 56, height: 56, borderRadius: 16,
-    backgroundColor: c.orangeLight, alignItems: 'center', justifyContent: 'center',
-    marginBottom: 16,
+  safe: { flex: 1, backgroundColor: '#050505' },
+  
+  topNav: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 10,
   },
-  headerTitle: { fontSize: FontSize.xl, fontWeight: '700', color: c.text, letterSpacing: -0.3, marginBottom: 8 },
-  headerSubtitle: { fontSize: FontSize.sm, color: c.text2, textAlign: 'center', lineHeight: 20 },
-
-  scopeRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  scopeBtn: {
-    flex: 1, paddingVertical: 12, borderRadius: Radius.sm,
-    backgroundColor: c.surface, borderWidth: 1, borderColor: c.border,
-    alignItems: 'center',
+  navIconBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  scopeBtnActive: { backgroundColor: c.orangeLight, borderColor: c.orange },
-  scopeText: { fontSize: 13, fontWeight: '600', color: c.text2 },
-  scopeTextActive: { color: c.orange },
+
+  emptyStateCentered: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    paddingBottom: 40,
+  },
+  orbitTitle: {
+    fontSize: 42, fontWeight: '700', color: '#fff',
+    letterSpacing: -1.5, marginBottom: 8,
+  },
+  orbitSubtitle: {
+    fontSize: 13, color: c.text3, fontWeight: '400',
+  },
 
   inputWrap: {
-    backgroundColor: c.bg3, borderWidth: 1, borderColor: c.border,
-    borderRadius: Radius.md, padding: 16, marginBottom: 16,
+    backgroundColor: '#0a0a0f',
+    borderWidth: 1, borderColor: '#3b2f4a', // Dark purple-ish border
+    borderRadius: 24, padding: 16,
+    marginTop: 'auto', // pushes to bottom if content is small
   },
   textArea: {
-    color: c.text, fontSize: FontSize.md, lineHeight: 22,
-    minHeight: 100, maxHeight: 200,
+    color: '#fff', fontSize: 14, lineHeight: 22,
+    minHeight: 60, maxHeight: 120, paddingBottom: 10,
+  },
+  inputBottomRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginTop: 8,
   },
   micBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center', justifyContent: 'center',
-    width: 36, height: 36,
-    backgroundColor: c.bg, borderRadius: 18, borderWidth: 1, borderColor: c.border
   },
   micBtnRecording: {
-    backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)'
+    backgroundColor: 'rgba(239,68,68,0.15)',
   },
-  clearBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingVertical: 6, paddingHorizontal: 10,
-    backgroundColor: c.bg, borderRadius: 16, borderWidth: 1, borderColor: c.border
+  planBtn: {
+    backgroundColor: c.orange,
+    paddingHorizontal: 20, paddingVertical: 10,
+    borderRadius: 20,
+  },
+  planBtnText: {
+    color: '#fff', fontSize: 13, fontWeight: '600',
   },
 
-  suggestLabel: { fontSize: 12, fontWeight: '700', color: c.text3, marginBottom: 10 },
-  suggestRow: { flexDirection: 'row', gap: 10, paddingRight: 20 },
-  suggestChip: {
-    backgroundColor: c.surface, borderWidth: 1, borderColor: c.border,
-    borderRadius: Radius.sm, paddingVertical: 10, paddingHorizontal: 14,
-    maxWidth: 220,
+  // Clarifications
+  chatBubble: {
+    width: 28, height: 28, borderRadius: 8,
+    backgroundColor: c.orangeLight,
+    alignItems: 'center', justifyContent: 'center',
   },
-  suggestText: { fontSize: 12, color: c.text2, lineHeight: 18 },
+  chatBubbleTitle: {
+    fontSize: 14, fontWeight: '700', color: c.text, letterSpacing: -0.2,
+  },
+  generateBtnLarge: {
+    backgroundColor: c.orange, borderRadius: Radius.sm,
+    paddingVertical: 16, alignItems: 'center', marginTop: 20,
+  },
+  generateTextLarge: { color: '#fff', fontSize: FontSize.md, fontWeight: '700' },
+  skipBtn: { alignItems: 'center', marginTop: 16, paddingVertical: 8 },
+  skipBtnText: { fontSize: 13, color: c.text3, fontWeight: '500' },
 
   errorBox: {
     backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1,
     borderColor: 'rgba(239,68,68,0.2)', borderRadius: Radius.sm,
-    padding: 16, marginBottom: 16,
+    padding: 16, marginTop: 24, width: '100%',
   },
-  errorText: { color: c.red, fontSize: FontSize.sm, fontWeight: '500' },
-
-  generateBtn: {
-    backgroundColor: c.orange, borderRadius: Radius.sm,
-    paddingVertical: 16, alignItems: 'center', justifyContent: 'center',
-    shadowColor: c.orange, shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35, shadowRadius: 16,
-  },
-  generateText: { color: '#fff', fontSize: FontSize.md, fontWeight: '700' },
+  errorText: { color: c.red, fontSize: FontSize.sm, fontWeight: '500', textAlign: 'center' },
 });

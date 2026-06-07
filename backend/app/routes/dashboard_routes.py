@@ -1,16 +1,19 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import User
+from ..rate_limiter import limiter
 
 router = APIRouter(tags=["Dashboard"])
 
 
 @router.get("/dashboard/stats", response_model=schemas.DashboardStats)
+@limiter.limit("60/minute")
 def get_dashboard_stats(
+    request: Request,
     weeks: int = Query(default=1, ge=1, le=4),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -19,7 +22,9 @@ def get_dashboard_stats(
 
 
 @router.get("/dashboard/search")
+@limiter.limit("60/minute")
 def dashboard_search(
+    request: Request,
     q: str = Query(default="", min_length=1, max_length=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

@@ -40,7 +40,6 @@ export default function Navbar() {
   const links = [
     { label: 'Features', href: '/#features' },
     { label: 'How it works', href: '/#how' },
-    { label: 'For Teams', href: '/#teams' },
     { label: 'About Us', href: '/about' },
     { label: 'Pricing', href: '/pricing' },
   ];
@@ -51,9 +50,27 @@ export default function Navbar() {
         {/* Logo */}
         <Link href="/" className="nav-logo">
           <div className="nav-logo-icon">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M10 3L17 7v6l-7 4-7-4V7l7-4z" stroke="white" strokeWidth="1.5" strokeLinejoin="round"/>
-              <circle cx="10" cy="10" r="2" fill="white"/>
+            <svg width="30" height="30" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="logo-svg" style={{ transition: 'transform 0.3s ease' }}>
+              <defs>
+                <linearGradient id="routinely-grad-nav" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="var(--orange)" />
+                  <stop offset="50%" stopColor="#ec4899" />
+                  <stop offset="100%" stopColor="var(--purple)" />
+                </linearGradient>
+                <filter id="r-shadow-nav" x="-2" y="-2" width="36" height="36" filterUnits="userSpaceOnUse">
+                  <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" floodColor="#000000" floodOpacity="0.4" />
+                </filter>
+              </defs>
+              <g filter="url(#r-shadow-nav)">
+                {/* Orbit */}
+                <path d="M 19.6 2.5 A 14 14 0 1 0 29.5 12.4" fill="none" stroke="url(#routinely-grad-nav)" strokeWidth="2.5" strokeLinecap="round" />
+                
+                {/* Orbital Dot */}
+                <circle cx="25.9" cy="6.1" r="2.8" fill="url(#routinely-grad-nav)" />
+                
+                {/* Letter R */}
+                <path d="M 12 8 L 18 8 A 5.5 5.5 0 0 1 18 19 L 9 19 L 14 24 L 18 24 L 10 16 L 18 16 A 2.5 2.5 0 0 0 18 11 L 9 11 Z" fill="url(#routinely-grad-nav)" />
+              </g>
             </svg>
           </div>
           <span className="nav-logo-text">Routinely</span>
