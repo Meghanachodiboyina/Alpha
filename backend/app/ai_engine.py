@@ -511,7 +511,7 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
                 return False
         return True
 
-    def find_free_slot(search_start: datetime, duration_mins: int, energy_req: str = "Medium") -> datetime | None:
+    def find_free_slot(search_start: datetime, duration_mins: int, energy_req: str = "Medium", requires_business_hours: bool = False) -> datetime | None:
         candidate = search_start
         step = timedelta(minutes=15)
         remainder = candidate.minute % 15
@@ -520,6 +520,13 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
             
         while candidate + timedelta(minutes=duration_mins) <= end_of_day:
             if is_slot_free(candidate, duration_mins):
+                # Reality Validation: Business hours constraint (10 AM to 9 PM in India)
+                if requires_business_hours:
+                    end_time = candidate + timedelta(minutes=duration_mins)
+                    if candidate.time() < time(10, 0) or end_time.time() > time(21, 0):
+                        candidate += step
+                        continue
+
                 # Calm personality avoids High energy tasks late at night if possible
                 if energy_req == "High" and personality == "Calm" and candidate.time() >= time(17, 0):
                     pass # We ideally skip this, but we rely on fallback if no earlier slot exists
@@ -607,16 +614,20 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
     for i, t in enumerate(flexible_tasks):
         duration = t.get("estimated_duration") or 60
         energy = str(t.get("energy_requirement", "Medium")).capitalize()
+        req_business = bool(t.get("requires_business_hours", False))
         
-        slot = find_free_slot(current_search, duration, energy)
+        slot = find_free_slot(current_search, duration, energy, requires_business_hours=req_business)
         
         if not slot:
             shrinked_duration = max(30, duration // 2)
-            slot = find_free_slot(current_search, shrinked_duration, energy)
+            slot = find_free_slot(current_search, shrinked_duration, energy, requires_business_hours=req_business)
             if slot:
                 duration = shrinked_duration
             else:
-                slot = occupied_slots[-1][1] if occupied_slots else current_search
+                # If still no slot (even after shrinking), fallback without business hour constraint if needed
+                slot = find_free_slot(current_search, shrinked_duration, energy, requires_business_hours=False)
+                if not slot:
+                    slot = occupied_slots[-1][1] if occupied_slots else current_search
         
         s, e = add_slot(slot, duration)
 
@@ -714,7 +725,7 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
                 suggestion=_suggestion_for(title, priority),
             )
         )
-    return results
+    return results, flexible_tasks
 
 def generate_heuristic_plan(input_text: str, plan_scope: str, start_after: datetime | None = None) -> AIGenerationResponse:
     tasks = _extract_tasks(input_text)
@@ -731,7 +742,7 @@ def generate_heuristic_plan(input_text: str, plan_scope: str, start_after: datet
         } 
         for t in tasks
     ]
-    planned_routines = _optimize_schedule(ai_tasks, plan_scope, start_after, "Balanced")
+    planned_routines, _ = _optimize_schedule(ai_tasks, plan_scope, start_after, "Balanced")
     return AIGenerationResponse(
         summary=f"Built a simple {plan_scope} routine.",
         productivity_tips=["Fallback scheduling used."],
@@ -763,10 +774,13 @@ Output STRICT JSON matching this schema:
       "estimated_duration": 60,
       "requires_focus": true/false,
       "requires_travel": true/false,
+      "requires_business_hours": true/false,
+      "requires_physical_presence": true/false,
       "travel_tier": "nearby|moderate|long_travel|unknown",
       "can_be_interrupted": true/false,
       "ideal_time_of_day": "morning|afternoon|evening|night|any",
       "energy_requirement": "High|Medium|Low",
+      "cognitive_load": "high|medium|low",
       "context_group": "Development",
       "focus_mode_recommended": true/false,
       "is_internal_logistic": true/false,
@@ -792,7 +806,8 @@ Rules:
 9. CONFIDENCE: Set confidence < 0.7 if the task is vague or ambiguous.
 10. DURATION CONFIDENCE: Set to "low" if you are unsure about the duration estimate.
 11. SCHEDULE DENSITY: Assess overall day load — "light" (1-3 easy tasks), "moderate" (4-6 tasks), "packed" (7+ tasks or many high-energy).
-12. {time_context_prompt}"""
+12. ANTI-HALLUCINATION: Do not invent locations, durations, or commitments. If uncertain, ask (set confidence < 0.7).
+13. {time_context_prompt}"""
 
     user_prompt = f"Today is {today}. Analyze this request:\n\n{input_text}"
 
@@ -881,6 +896,44 @@ def _build_clarification_questions(parsed: dict, max_questions: int = 2) -> list
                 default_value=str(est),
             ))
 
+    # 4. Business hours clarification
+    for i, task in enumerate(tasks):
+        if len(questions) >= max_questions:
+            break
+        if task.get("requires_business_hours") and not task.get("is_fixed_time") and not task.get("time_constraint"):
+            title = task.get("title", "this task")
+            questions.append(AIClarificationQuestion(
+                id=f"biz_hours_{i}",
+                question=f"Should {title.lower()} be done during business hours?",
+                type="single_choice",
+                options=[
+                    AIClarificationOption(value="yes", label="Yes (10AM-9PM)", emoji="🏪"),
+                    AIClarificationOption(value="no", label="Anytime", emoji="🕰️"),
+                ],
+                task_title=title,
+                default_value="yes",
+            ))
+
+    # 5. Timing Ambiguity
+    for i, task in enumerate(tasks):
+        if len(questions) >= max_questions:
+            break
+        ideal_time = task.get("ideal_time_of_day", "any")
+        if ideal_time == "any" and not task.get("is_fixed_time"):
+            title = task.get("title", "this task")
+            questions.append(AIClarificationQuestion(
+                id=f"timing_{i}",
+                question=f"When do you prefer to do {title.lower()}?",
+                type="single_choice",
+                options=[
+                    AIClarificationOption(value="morning", label="Morning", emoji="🌅"),
+                    AIClarificationOption(value="afternoon", label="Afternoon", emoji="☀️"),
+                    AIClarificationOption(value="evening", label="Evening", emoji="🌙"),
+                ],
+                task_title=title,
+                default_value="afternoon",
+            ))
+
     return questions
 
 
@@ -923,13 +976,23 @@ async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | 
     # High confidence — generate directly
     groq_tasks = parsed.get("tasks", [])
     personality = parsed.get("inferred_personality", "Balanced")
-    planned_routines = _optimize_schedule(groq_tasks, plan_scope, start_after, personality)
+    planned_routines, flex_tasks = _optimize_schedule(groq_tasks, plan_scope, start_after, personality)
 
     if planned_routines:
+        avg_confidence = sum(t.get("confidence", 1.0) for t in groq_tasks) / len(groq_tasks) if groq_tasks else 1.0
+        explanations = [f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus."]
+        for t in flex_tasks:
+            if t.get("requires_business_hours"):
+                explanations.append(f"{t.get('title')} was constrained to business hours (10 AM - 9 PM).")
+            if t.get("requires_focus"):
+                explanations.append(f"{t.get('title')} was placed to avoid fragmentation.")
+
         return AIAnalysisResponse(
             needs_clarification=False,
             result=AIGenerationResponse(
-                summary=f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus.",
+                summary=" ".join(explanations[:2]), # Keep summary brief
+                explanation=" ".join(explanations),
+                schedule_confidence=round(avg_confidence, 2),
                 productivity_tips=[
                     "Tasks were grouped by context to minimize mental switching.",
                     "Recovery breaks were automatically injected after intense focus blocks.",
@@ -973,10 +1036,13 @@ Output STRICT JSON matching this schema:
       "estimated_duration": 60,
       "requires_focus": true/false,
       "requires_travel": true/false,
+      "requires_business_hours": true/false,
+      "requires_physical_presence": true/false,
       "travel_tier": "nearby|moderate|long_travel",
       "can_be_interrupted": true/false,
       "ideal_time_of_day": "morning|afternoon|evening|night|any",
       "energy_requirement": "High|Medium|Low",
+      "cognitive_load": "high|medium|low",
       "context_group": "Development",
       "focus_mode_recommended": true/false,
       "is_internal_logistic": true/false,
@@ -994,7 +1060,8 @@ Rules:
 6. REALISM: For out-of-house events (movies=150-180min, gym=60-90min), estimate realistic durations and set requires_travel=true.
 7. TRAVEL TIER: "nearby" (15min buffer), "moderate" (30min buffer), "long_travel" (60min buffer).
 8. INTERNAL LOGISTICS: Set `is_internal_logistic = true` ONLY for purely internal spacing tasks like "returning home", generic transitions, or passive movement. If it's a primary human activity (e.g., "Movie", "Dinner"), set it to `false`. "Flight to Delhi" is an event, so it's `false`. "Return home" is usually just logistical, so `true`.
-9. {time_context_prompt}"""
+9. ANTI-HALLUCINATION: Do not invent locations, durations, or commitments. If uncertain, ask (set confidence < 0.7).
+10. {time_context_prompt}"""
 
     user_prompt = f"Today is {today}. Parse this request:\n\n{input_text}"
 
@@ -1033,11 +1100,21 @@ Rules:
                     except (ValueError, IndexError):
                         pass
 
-        planned_routines = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, travel_overrides=travel_overrides or None)
+        planned_routines, flex_tasks = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, travel_overrides=travel_overrides or None)
         
         if planned_routines:
+            avg_confidence = sum(t.get("confidence", 1.0) for t in groq_tasks) / len(groq_tasks) if groq_tasks else 1.0
+            explanations = [f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus."]
+            for t in flex_tasks:
+                if t.get("requires_business_hours"):
+                    explanations.append(f"{t.get('title')} was constrained to business hours (10 AM - 9 PM).")
+                if t.get("requires_focus"):
+                    explanations.append(f"{t.get('title')} was placed to avoid fragmentation.")
+
             return AIGenerationResponse(
-                summary=f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus.",
+                summary=" ".join(explanations[:2]), # Keep summary brief
+                explanation=" ".join(explanations),
+                schedule_confidence=round(avg_confidence, 2),
                 productivity_tips=[
                     "Tasks were grouped by context to minimize mental switching.",
                     "Recovery breaks were automatically injected after intense focus blocks.",

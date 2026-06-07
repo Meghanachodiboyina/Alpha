@@ -8,7 +8,7 @@ from email.message import EmailMessage
 
 import bcrypt
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -210,6 +210,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 
 def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> models.User:
@@ -239,4 +240,5 @@ def get_current_user(
         db.commit()
         db.refresh(user)
         
+    request.state.user = user
     return user

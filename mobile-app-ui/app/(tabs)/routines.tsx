@@ -100,7 +100,7 @@ export default function RoutinesScreen() {
       if (params.rescheduleTaskId) {
         setRescheduleTaskId(Number(params.rescheduleTaskId));
       }
-      setLoading(true);
+      // Don't setLoading(true) here for silent background refresh
       fetchRoutines();
     }, [params.rescheduleTaskId])
   );
@@ -129,11 +129,26 @@ export default function RoutinesScreen() {
     } catch {}
   };
 
-  const deleteRoutine = async (id: number) => {
-    try {
-      await api.delete(`/routines/${id}`);
-      setRoutines(prev => prev.filter(r => r.id !== id));
-    } catch {}
+  const deleteRoutine = (id: number) => {
+    Alert.alert(
+      'Delete Routine',
+      'Are you sure you want to delete this routine?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/routines/${id}`);
+              setRoutines(prev => prev.filter(r => r.id !== id));
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to delete routine.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleCreate = async () => {

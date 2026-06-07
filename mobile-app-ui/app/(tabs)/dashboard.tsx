@@ -5,7 +5,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { DashboardSkeleton, FadeInView } from '../../components/PremiumLoader';
+import { DashboardSkeleton, FadeInView, appState } from '../../components/PremiumLoader';
+import SplashAnimation from '../../components/SplashAnimation';
 import { Feather } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 import api from '@/lib/api';
@@ -21,6 +22,7 @@ export default function DashboardScreen() {
   const [routines, setRoutines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [splashDone, setSplashDone] = useState(!appState.justLoggedIn);
   const { user } = useAuth();
   const [aiSuggestionDismissed, setAiSuggestionDismissed] = useState(false);
   const router = useRouter();
@@ -37,7 +39,7 @@ export default function DashboardScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
+      // Don't setLoading(true) here, so tab switches instantly show stale data while background refreshing
       fetchData();
       fetchNotifications();
     }, [])
@@ -64,23 +66,8 @@ export default function DashboardScreen() {
   }, [searchQuery]);
 
   const fetchNotifications = async () => {
-    try {
-      let notifs: any[] = [];
-      try {
-        const routinesData = await api.get('/routines');
-        const todayRoutines = routinesData.filter((r: any) =>
-          r.status === 'Pending' && r.date === new Date().toISOString().split('T')[0]
-        );
-        if (todayRoutines.length > 0) {
-          notifs.push({
-            id: 2, type: 'alert', title: 'Upcoming Routines',
-            message: `You have ${todayRoutines.length} pending routines for today.`,
-            read: false, time: 'Just now',
-          });
-        }
-      } catch {}
-      setNotifications(notifs);
-    } catch {}
+    // Fake notifications logic removed to prevent annoying unread badges on every refresh
+    setNotifications([]);
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -172,13 +159,14 @@ export default function DashboardScreen() {
 
   const isDarkMode = themeMode === 'dark' || (themeMode === 'system');
 
-  if (loading && !refreshing) {
-    return <DashboardSkeleton />;
-  }
+  const renderContent = () => {
+    if (loading && !refreshing) {
+      return <DashboardSkeleton />;
+    }
 
-  return (
-    <FadeInView>
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={['top']}>
+    return (
+      <FadeInView>
+        <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={['top']}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -673,5 +661,18 @@ export default function DashboardScreen() {
       </ScrollView>
       </SafeAreaView>
     </FadeInView>
+    );
+  };
+
+  return (
+    <>
+      {renderContent()}
+      {!splashDone && (
+        <SplashAnimation onFinished={() => {
+          setSplashDone(true);
+          appState.justLoggedIn = false;
+        }} />
+      )}
+    </>
   );
 }

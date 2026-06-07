@@ -29,14 +29,6 @@ const plans = [
     action: "Start Free Trial",
     recommended: true,
   },
-  {
-    id: "team",
-    name: "Team",
-    price: "$10",
-    period: "/user/mo",
-    features: ["Everything in Pro", "Shared Workspaces", "Team Velocity Tracking", "Priority Support"],
-    action: "Contact Sales",
-  },
 ];
 
 export default function PricingPage() {
@@ -93,6 +85,8 @@ export default function PricingPage() {
               gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
               gap: "2rem",
               alignItems: "stretch",
+              maxWidth: "800px",
+              marginInline: "auto",
             }}
           >
             {plans.map((plan) => {

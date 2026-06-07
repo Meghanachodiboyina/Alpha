@@ -10,6 +10,8 @@ import { Radius, FontSize } from '@/constants/Colors';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/context/ThemeContext';
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Path, Circle } from 'react-native-svg';
+import { appState } from '@/components/PremiumLoader';
 
 export default function LoginScreen() {
   const { theme } = useTheme();
@@ -41,10 +43,10 @@ export default function LoginScreen() {
         throw supaError;
       }
       
+      appState.justLoggedIn = true;
       router.replace('/(tabs)/dashboard');
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.');
-    } finally {
       setLoading(false);
     }
   };
@@ -62,9 +64,18 @@ export default function LoginScreen() {
         >
           {/* Logo */}
           <View style={s.logoRow}>
-            <View style={s.logoIcon}>
-              <Text style={s.logoEmoji}>◆</Text>
-            </View>
+            <Svg width="40" height="40" viewBox="0 0 32 32" fill="none">
+              <Defs>
+                <SvgLinearGradient id="routinely-grad-nav" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <Stop offset="0%" stopColor={theme.orange || "#ff6b35"} />
+                  <Stop offset="50%" stopColor="#ec4899" />
+                  <Stop offset="100%" stopColor={theme.purple || "#8b5cf6"} />
+                </SvgLinearGradient>
+              </Defs>
+              <Path d="M 19.6 2.5 A 14 14 0 1 0 29.5 12.4" fill="none" stroke="url(#routinely-grad-nav)" strokeWidth="2.5" strokeLinecap="round" />
+              <Circle cx="25.9" cy="6.1" r="2.8" fill="url(#routinely-grad-nav)" />
+              <Path d="M 12 8 L 18 8 A 5.5 5.5 0 0 1 18 19 L 9 19 L 14 24 L 18 24 L 10 16 L 18 16 A 2.5 2.5 0 0 0 18 11 L 9 11 Z" fill="url(#routinely-grad-nav)" />
+            </Svg>
             <Text style={s.logoText}>Routinely</Text>
           </View>
 

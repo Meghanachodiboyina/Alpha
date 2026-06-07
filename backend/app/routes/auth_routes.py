@@ -1,20 +1,29 @@
-from datetime import datetime, timedelta, timezone
-import smtplib
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from .. import crud, schemas
-from ..auth import (
-    create_access_token,
-    generate_otp_code,
-    hash_password,
-    send_password_reset_email,
-    verify_password,
-)
+from .. import crud, schemas, models
+from ..auth import get_current_user
 from ..database import get_db
+from ..rate_limiter import limiter
 
-router = APIRouter(tags=["Authentication"])
-# Auth endpoints removed. 
-# Mobile app now uses Supabase Auth directly for register, login, and forgot-password flows.
+router = APIRouter(tags=["Authentication & Users"])
+
+@router.delete("/users/me", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5/minute")
+def delete_current_user(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    GDPR Right to be Forgotten.
+    Deletes the user and all associated data from the backend.
+    Note: Supabase Auth user must be deleted from the client via Supabase API.
+    """
+    # Delete the user from the database.
+    # Due to cascade rules in models.py, this will delete:
+    # routines, ai_usages, reset_otps, project_tasks, workspace_tasks, 
+    # workspace_settings, workspace_ai_records.
+    db.delete(current_user)
+    db.commit()
+    return None

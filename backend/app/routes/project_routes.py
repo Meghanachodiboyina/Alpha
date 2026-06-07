@@ -3,13 +3,14 @@ import os
 import smtplib
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
 from ..auth import create_invite_token, decode_invite_token, get_current_user, send_workspace_invite_email
 from ..database import get_db
 from ..models import User
+from ..rate_limiter import limiter
 
 router = APIRouter(tags=["Project Management"])
 
@@ -22,7 +23,9 @@ def _frontend_invite_url(invite_token: str) -> str:
 
 
 @router.get("/projects/tasks", response_model=list[schemas.ProjectTaskOut])
+@limiter.limit("60/minute")
 def list_project_tasks(
+    request: Request,
     due_date: date | None = Query(default=None),
     assignee: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
@@ -47,7 +50,9 @@ def list_project_tasks(
 
 
 @router.post("/projects/tasks", response_model=schemas.ProjectTaskOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 def create_project_task(
+    request: Request,
     payload: schemas.ProjectTaskCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -56,7 +61,9 @@ def create_project_task(
 
 
 @router.put("/projects/tasks/{task_id}", response_model=schemas.ProjectTaskOut)
+@limiter.limit("60/minute")
 def update_project_task(
+    request: Request,
     task_id: int,
     payload: schemas.ProjectTaskUpdate,
     db: Session = Depends(get_db),
@@ -69,7 +76,9 @@ def update_project_task(
 
 
 @router.delete("/projects/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("60/minute")
 def delete_project_task(
+    request: Request,
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -81,7 +90,9 @@ def delete_project_task(
 
 
 @router.get("/workspace/invitations", response_model=list[schemas.WorkspaceInviteOut])
+@limiter.limit("60/minute")
 def list_workspace_invitations(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -102,7 +113,9 @@ def list_workspace_invitations(
 
 
 @router.post("/workspace/invitations", response_model=schemas.MessageResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 def create_workspace_invitation(
+    request: Request,
     payload: schemas.WorkspaceInviteCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -139,7 +152,9 @@ def create_workspace_invitation(
 
 
 @router.post("/workspace/invitations/accept-token", response_model=schemas.MessageResponse)
+@limiter.limit("60/minute")
 def accept_workspace_invitation_by_token(
+    request: Request,
     payload: schemas.WorkspaceInviteTokenAccept,
     db: Session = Depends(get_db),
 ):
@@ -161,7 +176,9 @@ def accept_workspace_invitation_by_token(
 
 
 @router.post("/workspace/invitations/{invite_id}/respond", response_model=schemas.MessageResponse)
+@limiter.limit("60/minute")
 def respond_workspace_invitation(
+    request: Request,
     invite_id: int,
     payload: schemas.WorkspaceInviteRespond,
     db: Session = Depends(get_db),
@@ -180,7 +197,9 @@ def respond_workspace_invitation(
 
 
 @router.get("/workspace/members", response_model=list[schemas.WorkspaceMemberOut])
+@limiter.limit("60/minute")
 def list_workspace_members(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

@@ -114,7 +114,7 @@ export default function HomePage() {
 
             <p className="body-lg text-muted anim-fade-up-delay-2" style={{ maxWidth: 580, marginBottom: "2.5rem" }}>
               Routinely turns your messy thoughts into high-performance routines.
-              Built for founders, creators, and teams who refuse to settle for less.
+              Built for founders and creators who refuse to settle for less.
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-4 anim-fade-up-delay-3">

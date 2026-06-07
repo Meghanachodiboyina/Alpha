@@ -199,6 +199,8 @@ class AIGenerationResponse(BaseModel):
     summary: str
     productivity_tips: list[str]
     routines: list[AIPlannedRoutine]
+    schedule_confidence: float = Field(default=1.0)
+    explanation: Optional[str] = None
 
 
 class AIClarificationOption(BaseModel):
@@ -625,3 +627,16 @@ class WorkspaceBootstrapResponse(BaseModel):
     ai_task_groups: list[WorkspaceAITaskGroupOut] = []
     reports: WorkspaceReportOut
     settings: WorkspaceSettingsOut
+
+class UserPreferenceCreate(BaseModel):
+    category: str = Field(..., max_length=120)
+    value: str
+
+class UserPreferenceOut(BaseModel):
+    id: int
+    user_id: str
+    category: str
+    value: str
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

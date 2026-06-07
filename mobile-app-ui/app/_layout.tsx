@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, Platform, Dimensions } from 'react-native';
+import { View, ActivityIndicator, Alert } from 'react-native';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
-
-import { Alert } from 'react-native';
 
 function useProtectedRoute(isAuthenticated: boolean | null, hasCompletedOnboarding: boolean | null) {
   const segments = useSegments();
