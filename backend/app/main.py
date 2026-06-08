@@ -1,12 +1,10 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
-
+from .config import settings
 from .database import Base, engine
 from .routes import auth_routes, dashboard_routes, project_routes, routine_routes, workspace_routes
 
@@ -18,25 +16,36 @@ app = FastAPI(
     version="1.0.0",
 )
 
-frontend_origin_setting = os.getenv("FRONTEND_ORIGIN") or os.getenv("FRONTEND_URL") or "*"
-allowed_origins = [
-    origin.strip().rstrip("/")
-    for origin in frontend_origin_setting.split(",")
-    if origin.strip()
-]
-allow_all_origins = "*" in allowed_origins or not allowed_origins
-if not allow_all_origins:
-    for dev_origin in ("http://127.0.0.1:5500", "http://localhost:5500"):
-        if dev_origin not in allowed_origins:
-            allowed_origins.append(dev_origin)
+frontend_origin = settings.FRONTEND_ORIGIN
+
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from .rate_limiter import limiter
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if allow_all_origins else allowed_origins,
-    allow_credentials=not allow_all_origins,
+    allow_origins=[frontend_origin] if frontend_origin != "*" else ["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from fastapi import Request
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 app.include_router(auth_routes.router)
 app.include_router(routine_routes.router)

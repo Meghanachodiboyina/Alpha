@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -26,7 +26,7 @@ def create_user(db: Session, name: str, email: str, password_hash: str):
     return user
 
 
-def create_routine(db: Session, user_id: int, routine: schemas.RoutineCreate):
+def create_routine(db: Session, user_id: str, routine: schemas.RoutineCreate):
     routine_data = routine.model_dump()
     if not routine_data.get("suggestion"):
         routine_data["suggestion"] = generate_task_suggestion(
@@ -41,22 +41,23 @@ def create_routine(db: Session, user_id: int, routine: schemas.RoutineCreate):
     return db_routine
 
 
-def get_routines(db: Session, user_id: int):
+def get_routines(db: Session, user_id: str):
     return (
         db.query(models.Routine)
-        .filter(models.Routine.user_id == user_id)
+        .filter(models.Routine.user_id == user_id, models.Routine.is_internal == False)
         .order_by(models.Routine.date.asc(), models.Routine.start_time.asc())
         .all()
     )
 
 
-def get_weekly_routines(db: Session, user_id: int):
+def get_weekly_routines(db: Session, user_id: str):
     today = date.today()
     end_of_window = today + timedelta(days=6)
     return (
         db.query(models.Routine)
         .filter(
             models.Routine.user_id == user_id,
+            models.Routine.is_internal == False,
             models.Routine.date >= today,
             models.Routine.date <= end_of_window,
         )
@@ -65,7 +66,7 @@ def get_weekly_routines(db: Session, user_id: int):
     )
 
 
-def get_routine_by_id(db: Session, routine_id: int, user_id: int):
+def get_routine_by_id(db: Session, routine_id: int, user_id: str):
     return (
         db.query(models.Routine)
         .filter(models.Routine.id == routine_id, models.Routine.user_id == user_id)
@@ -73,7 +74,7 @@ def get_routine_by_id(db: Session, routine_id: int, user_id: int):
     )
 
 
-def clear_existing_reset_otps(db: Session, user_id: int):
+def clear_existing_reset_otps(db: Session, user_id: str):
     (
         db.query(models.PasswordResetOTP)
         .filter(
@@ -85,7 +86,7 @@ def clear_existing_reset_otps(db: Session, user_id: int):
     db.commit()
 
 
-def create_password_reset_otp(db: Session, user_id: int, otp_hash: str, expires_at: datetime):
+def create_password_reset_otp(db: Session, user_id: str, otp_hash: str, expires_at: datetime):
     clear_existing_reset_otps(db, user_id)
     db_otp = models.PasswordResetOTP(user_id=user_id, otp_hash=otp_hash, expires_at=expires_at)
     db.add(db_otp)
@@ -94,13 +95,13 @@ def create_password_reset_otp(db: Session, user_id: int, otp_hash: str, expires_
     return db_otp
 
 
-def get_active_password_reset_otp(db: Session, user_id: int):
+def get_active_password_reset_otp(db: Session, user_id: str):
     return (
         db.query(models.PasswordResetOTP)
         .filter(
             models.PasswordResetOTP.user_id == user_id,
             models.PasswordResetOTP.consumed_at.is_(None),
-            models.PasswordResetOTP.expires_at >= datetime.utcnow(),
+            models.PasswordResetOTP.expires_at >= datetime.now(timezone.utc),
         )
         .order_by(models.PasswordResetOTP.created_at.desc())
         .first()
@@ -108,7 +109,7 @@ def get_active_password_reset_otp(db: Session, user_id: int):
 
 
 def consume_password_reset_otp(db: Session, db_otp: models.PasswordResetOTP):
-    db_otp.consumed_at = datetime.utcnow()
+    db_otp.consumed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(db_otp)
     return db_otp
@@ -135,9 +136,31 @@ def update_routine(db: Session, db_routine: models.Routine, routine_update: sche
             db_routine.priority,
         )
 
+    if "start_time" in update_data and db_routine.start_time != update_data["start_time"]:
+        # User manually changed the time, let's learn this preference
+        new_time = update_data["start_time"]
+        if new_time:
+            time_str = new_time.strftime("%H:%M")
+            upsert_user_preference(db, db_routine.user_id, f"time_preference_{db_routine.title.lower()}", time_str)
+
     db.commit()
     db.refresh(db_routine)
     return db_routine
+
+def upsert_user_preference(db: Session, user_id: str, category: str, value: str):
+    db_pref = db.query(models.UserPreference).filter_by(user_id=user_id, category=category).first()
+    if db_pref:
+        db_pref.value = value
+        db_pref.updated_at = datetime.now(timezone.utc)
+    else:
+        db_pref = models.UserPreference(
+            user_id=user_id,
+            category=category,
+            value=value
+        )
+        db.add(db_pref)
+    db.commit()
+    return db_pref
 
 
 
@@ -146,7 +169,7 @@ def delete_routine(db: Session, db_routine: models.Routine):
     db.commit()
 
 
-def create_many_routines(db: Session, user_id: int, routines: list[schemas.AIPlannedRoutine]):
+def create_many_routines(db: Session, user_id: str, routines: list[schemas.AIPlannedRoutine]):
     created_items = []
     for routine in routines:
         routine_data = routine.model_dump()
@@ -166,46 +189,56 @@ def create_many_routines(db: Session, user_id: int, routines: list[schemas.AIPla
     return created_items
 
 
-def get_dashboard_stats(db: Session, user_id: int):
+def get_dashboard_stats(db: Session, user_id: str, weeks: int = 1):
     total_routines = (
         db.query(func.count(models.Routine.id))
-        .filter(models.Routine.user_id == user_id)
+        .filter(models.Routine.user_id == user_id, models.Routine.is_internal == False)
         .scalar()
         or 0
     )
     completed_routines = (
         db.query(func.count(models.Routine.id))
-        .filter(models.Routine.user_id == user_id, models.Routine.status == "Completed")
+        .filter(models.Routine.user_id == user_id, models.Routine.status == "Completed", models.Routine.is_internal == False)
         .scalar()
         or 0
     )
     pending_routines = total_routines - completed_routines
     today_routines = (
         db.query(func.count(models.Routine.id))
-        .filter(models.Routine.user_id == user_id, models.Routine.date == date.today())
+        .filter(models.Routine.user_id == user_id, models.Routine.date == date.today(), models.Routine.is_internal == False)
         .scalar()
         or 0
     )
 
     productivity_score = int((completed_routines / total_routines) * 100) if total_routines else 0
 
-    start_of_week = date.today() - timedelta(days=date.today().weekday())
+    # Build weekly overview for N weeks (current + past weeks)
+    start_of_current_week = date.today() - timedelta(days=date.today().weekday())
+    start_date = start_of_current_week - timedelta(weeks=weeks - 1)
+    end_date = start_of_current_week + timedelta(days=6)
+    total_days = (end_date - start_date).days + 1
+
     weekly_rows = (
         db.query(models.Routine.date, func.count(models.Routine.id))
         .filter(
             models.Routine.user_id == user_id,
-            models.Routine.date >= start_of_week,
-            models.Routine.date <= start_of_week + timedelta(days=6),
+            models.Routine.is_internal == False,
+            models.Routine.date >= start_date,
+            models.Routine.date <= end_date,
         )
         .group_by(models.Routine.date)
         .order_by(models.Routine.date.asc())
         .all()
     )
 
-    weekly_overview = [
-        {"date": routine_date.isoformat(), "count": count}
-        for routine_date, count in weekly_rows
-    ]
+    weekly_map = {routine_date.isoformat(): count for routine_date, count in weekly_rows}
+    weekly_overview = []
+    for i in range(total_days):
+        current_date = start_date + timedelta(days=i)
+        weekly_overview.append({
+            "date": current_date.isoformat(),
+            "count": weekly_map.get(current_date.isoformat(), 0)
+        })
 
     return schemas.DashboardStats(
         total_routines=total_routines,
@@ -219,7 +252,7 @@ def get_dashboard_stats(db: Session, user_id: int):
 
 def get_project_tasks(
     db: Session,
-    user_id: int,
+    user_id: str,
     due_date: date | None = None,
     assignee: str | None = None,
     status: str | None = None,
@@ -264,7 +297,7 @@ def get_project_tasks(
     return query.order_by(sort_column, models.ProjectTask.created_at.asc()).all()
 
 
-def create_project_task(db: Session, user_id: int, payload: schemas.ProjectTaskCreate):
+def create_project_task(db: Session, user_id: str, payload: schemas.ProjectTaskCreate):
     db_task = models.ProjectTask(user_id=user_id, **payload.model_dump())
     db.add(db_task)
     db.commit()
@@ -272,7 +305,7 @@ def create_project_task(db: Session, user_id: int, payload: schemas.ProjectTaskC
     return db_task
 
 
-def get_project_task_by_id(db: Session, task_id: int, user_id: int):
+def get_project_task_by_id(db: Session, task_id: int, user_id: str):
     return (
         db.query(models.ProjectTask)
         .filter(models.ProjectTask.id == task_id, models.ProjectTask.user_id == user_id)
@@ -294,7 +327,7 @@ def delete_project_task(db: Session, db_task: models.ProjectTask):
     db.commit()
 
 
-def create_workspace_invite(db: Session, inviter_user_id: int, invitee_email: str, role: str = "Member"):
+def create_workspace_invite(db: Session, inviter_user_id: str, invitee_email: str, role: str = "Member"):
     existing_invite = (
         db.query(models.WorkspaceInvite)
         .filter(
@@ -338,40 +371,31 @@ def list_workspace_invites(db: Session, current_user: models.User):
 
 def respond_workspace_invite(db: Session, invite: models.WorkspaceInvite, action: str):
     invite.status = "Accepted" if action == "accept" else "Declined"
-    invite.responded_at = datetime.utcnow()
+    invite.responded_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(invite)
     return invite
 
 
 def get_workspace_members(db: Session, current_user: models.User):
-    scope_user_ids = _get_workspace_scope_user_ids(db, current_user)
-    users_by_id = {
-        user.id: user
-        for user in db.query(models.User).filter(models.User.id.in_(scope_user_ids)).all()
-    }
-    users_by_email = {user.email.lower(): user for user in users_by_id.values()}
     accepted_invites = (
-        db.query(models.WorkspaceInvite)
+        db.query(models.WorkspaceInvite, models.User)
+        .outerjoin(models.User, models.User.email == models.WorkspaceInvite.invitee_email)
         .filter(
             models.WorkspaceInvite.status == "Accepted",
             (
-                models.WorkspaceInvite.inviter_user_id.in_(scope_user_ids)
-                | models.WorkspaceInvite.invitee_email.in_([user.email for user in users_by_id.values()])
+                (models.WorkspaceInvite.inviter_user_id == current_user.id)
+                | (models.WorkspaceInvite.invitee_email == current_user.email)
             ),
         )
         .all()
     )
 
-    members = {}
-    for user in users_by_id.values():
-        members[(user.email, user.name)] = ("Owner" if user.id == current_user.id else "Member", user.id == current_user.id)
-
-    for invite in accepted_invites:
-        inviter = users_by_id.get(invite.inviter_user_id)
+    members = {(current_user.email, current_user.name): ("Owner", True)}
+    for invite, invited_user in accepted_invites:
+        inviter = db.query(models.User).filter(models.User.id == invite.inviter_user_id).first()
         if inviter:
             members[(inviter.email, inviter.name)] = ("Owner" if inviter.id == current_user.id else "Admin", inviter.id == current_user.id)
-        invited_user = users_by_email.get(invite.invitee_email.lower())
         if invited_user:
             members[(invited_user.email, invited_user.name)] = (invite.role, invited_user.id == current_user.id)
         else:
@@ -402,7 +426,7 @@ def _serialize_workspace_settings(settings: models.WorkspaceSettings) -> schemas
 
 def ensure_workspace_project(
     db: Session,
-    user_id: int,
+    user_id: str,
     project_name: str,
     description: str | None = None,
     color: str = "#22c1c3",
@@ -462,7 +486,7 @@ def update_workspace_settings(
         update_data.pop("smtp_password")
     for field, value in update_data.items():
         setattr(settings, field, value)
-    settings.updated_at = datetime.utcnow()
+    settings.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(settings)
     return _serialize_workspace_settings(settings)
@@ -492,7 +516,7 @@ def get_workspace_projects(db: Session, current_user: models.User) -> list[schem
                 name=project_name,
                 description=None,
                 color="#22c1c3",
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
             )
 
     if "team space" not in project_map:
@@ -528,22 +552,19 @@ def create_workspace_project(
 
 
 def get_workspace_project_by_id(db: Session, current_user: models.User, project_id: int):
-    scope_user_ids = _get_workspace_scope_user_ids(db, current_user)
     return (
         db.query(models.WorkspaceProject)
         .filter(
             models.WorkspaceProject.id == project_id,
-            models.WorkspaceProject.user_id.in_(scope_user_ids),
+            models.WorkspaceProject.user_id == current_user.id,
         )
         .first()
     )
 
 
 def delete_workspace_project(db: Session, project: models.WorkspaceProject):
-    project_owner = db.query(models.User).filter(models.User.id == project.user_id).first()
-    scope_user_ids = _get_workspace_scope_user_ids(db, project_owner) if project_owner else [project.user_id]
     tasks = db.query(models.WorkspaceTask).filter(
-        models.WorkspaceTask.user_id.in_(scope_user_ids),
+        models.WorkspaceTask.user_id == project.user_id,
         models.WorkspaceTask.project_name == project.name,
     ).all()
     for task in tasks:
@@ -552,30 +573,25 @@ def delete_workspace_project(db: Session, project: models.WorkspaceProject):
     db.commit()
 
 
-def _get_workspace_scope_user_ids(db: Session, current_user: models.User) -> list[int]:
-    accepted_invites = db.query(models.WorkspaceInvite).filter(models.WorkspaceInvite.status == "Accepted").all()
-    email_lookup = {
-        user.email.lower(): user.id
-        for user in db.query(models.User).all()
-    }
-    adjacency: dict[int, set[int]] = {}
+def _get_workspace_scope_user_ids(db: Session, current_user: models.User) -> list[str]:
+    accepted_invites = (
+        db.query(models.WorkspaceInvite)
+        .filter(
+            models.WorkspaceInvite.status == "Accepted",
+            (
+                (models.WorkspaceInvite.inviter_user_id == current_user.id)
+                | (models.WorkspaceInvite.invitee_email == current_user.email)
+            ),
+        )
+        .all()
+    )
 
+    user_ids = {current_user.id}
     for invite in accepted_invites:
-        invited_user_id = email_lookup.get(invite.invitee_email.lower())
-        if not invited_user_id:
-            continue
-        adjacency.setdefault(invite.inviter_user_id, set()).add(invited_user_id)
-        adjacency.setdefault(invited_user_id, set()).add(invite.inviter_user_id)
-
-    user_ids = set()
-    pending = [current_user.id]
-    while pending:
-        user_id = pending.pop()
-        if user_id in user_ids:
-            continue
-        user_ids.add(user_id)
-        pending.extend(adjacency.get(user_id, set()) - user_ids)
-
+        user_ids.add(invite.inviter_user_id)
+        invited_user = get_user_by_email(db, invite.invitee_email)
+        if invited_user:
+            user_ids.add(invited_user.id)
     return sorted(user_ids)
 
 
@@ -637,7 +653,7 @@ def get_workspace_tasks(
     return tasks
 
 
-def create_workspace_task(db: Session, user_id: int, payload: schemas.WorkspaceTaskCreate):
+def create_workspace_task(db: Session, user_id: str, payload: schemas.WorkspaceTaskCreate):
     ensure_workspace_project(db, user_id, payload.project_name)
     db_task = models.WorkspaceTask(user_id=user_id, **payload.model_dump())
     db.add(db_task)
@@ -646,7 +662,7 @@ def create_workspace_task(db: Session, user_id: int, payload: schemas.WorkspaceT
     return db_task
 
 
-def create_many_workspace_tasks(db: Session, user_id: int, tasks: list[schemas.WorkspaceTaskCreate]):
+def create_many_workspace_tasks(db: Session, user_id: str, tasks: list[schemas.WorkspaceTaskCreate]):
     created_items = []
     for task in tasks:
         ensure_workspace_project(db, user_id, task.project_name)
@@ -659,7 +675,7 @@ def create_many_workspace_tasks(db: Session, user_id: int, tasks: list[schemas.W
     return created_items
 
 
-def get_workspace_task_by_id(db: Session, task_id: int, user_id: int):
+def get_workspace_task_by_id(db: Session, task_id: int, user_id: str):
     current_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not current_user:
         return None
@@ -689,11 +705,11 @@ def delete_workspace_task(db: Session, db_task: models.WorkspaceTask):
 
 def create_workspace_ai_task_records(
     db: Session,
-    user_id: int,
-    task_ids: list[int],
+    user_id: str,
+    task_ids: list[str],
     prompt: str,
 ):
-    batch_created_at = datetime.utcnow()
+    batch_created_at = datetime.now(timezone.utc)
     for task_id in task_ids:
         db.add(models.WorkspaceAITaskRecord(user_id=user_id, task_id=task_id, prompt=prompt, created_at=batch_created_at))
     db.commit()

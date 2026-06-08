@@ -1,45 +1,31 @@
 from datetime import date
 import os
 import smtplib
-from urllib.parse import urlparse, urlencode
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
 from ..auth import create_invite_token, decode_invite_token, get_current_user, send_workspace_invite_email
 from ..database import get_db
 from ..models import User
+from ..rate_limiter import limiter
 
 router = APIRouter(tags=["Project Management"])
-PRODUCTION_FRONTEND_URL = "https://frontend-jdpqhhqot-meghanachodiboyinas-projects.vercel.app"
 
 
-def _request_frontend_origin(request: Request) -> str:
-    origin = (request.headers.get("origin") or "").strip().rstrip("/")
-    if origin:
-        return origin
-
-    referer = (request.headers.get("referer") or "").strip()
-    if referer:
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-
-    return ""
-
-
-def _frontend_invite_url(invite_token: str, request: Request | None = None) -> str:
+def _frontend_invite_url(invite_token: str) -> str:
     configured_frontend = (os.getenv("FRONTEND_URL") or os.getenv("FRONTEND_ORIGIN") or "").strip().rstrip("/")
     if not configured_frontend or configured_frontend == "*":
-        configured_frontend = _request_frontend_origin(request) if request else ""
-    if not configured_frontend:
-        configured_frontend = PRODUCTION_FRONTEND_URL
+        configured_frontend = "http://127.0.0.1:5500/AutomatedRoutineCreator/frontend"
     return f"{configured_frontend}/accept-invite.html?{urlencode({'token': invite_token})}"
 
 
 @router.get("/projects/tasks", response_model=list[schemas.ProjectTaskOut])
+@limiter.limit("60/minute")
 def list_project_tasks(
+    request: Request,
     due_date: date | None = Query(default=None),
     assignee: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
@@ -64,7 +50,9 @@ def list_project_tasks(
 
 
 @router.post("/projects/tasks", response_model=schemas.ProjectTaskOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 def create_project_task(
+    request: Request,
     payload: schemas.ProjectTaskCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -73,7 +61,9 @@ def create_project_task(
 
 
 @router.put("/projects/tasks/{task_id}", response_model=schemas.ProjectTaskOut)
+@limiter.limit("60/minute")
 def update_project_task(
+    request: Request,
     task_id: int,
     payload: schemas.ProjectTaskUpdate,
     db: Session = Depends(get_db),
@@ -86,7 +76,9 @@ def update_project_task(
 
 
 @router.delete("/projects/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("60/minute")
 def delete_project_task(
+    request: Request,
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -98,7 +90,9 @@ def delete_project_task(
 
 
 @router.get("/workspace/invitations", response_model=list[schemas.WorkspaceInviteOut])
+@limiter.limit("60/minute")
 def list_workspace_invitations(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -119,9 +113,10 @@ def list_workspace_invitations(
 
 
 @router.post("/workspace/invitations", response_model=schemas.MessageResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 def create_workspace_invitation(
-    payload: schemas.WorkspaceInviteCreate,
     request: Request,
+    payload: schemas.WorkspaceInviteCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -129,7 +124,7 @@ def create_workspace_invitation(
         raise HTTPException(status_code=400, detail="You cannot invite your own email.")
     invite = crud.create_workspace_invite(db, current_user.id, payload.invitee_email.lower(), payload.role)
     settings = crud.get_workspace_settings_record(db, current_user)
-    invite_link = _frontend_invite_url(create_invite_token(invite.id, invite.invitee_email), request)
+    invite_link = _frontend_invite_url(create_invite_token(invite.id, invite.invitee_email))
     smtp_config = {
         "smtp_host": settings.smtp_host,
         "smtp_port": settings.smtp_port,
@@ -157,7 +152,9 @@ def create_workspace_invitation(
 
 
 @router.post("/workspace/invitations/accept-token", response_model=schemas.MessageResponse)
+@limiter.limit("60/minute")
 def accept_workspace_invitation_by_token(
+    request: Request,
     payload: schemas.WorkspaceInviteTokenAccept,
     db: Session = Depends(get_db),
 ):
@@ -179,7 +176,9 @@ def accept_workspace_invitation_by_token(
 
 
 @router.post("/workspace/invitations/{invite_id}/respond", response_model=schemas.MessageResponse)
+@limiter.limit("60/minute")
 def respond_workspace_invitation(
+    request: Request,
     invite_id: int,
     payload: schemas.WorkspaceInviteRespond,
     db: Session = Depends(get_db),
@@ -198,7 +197,9 @@ def respond_workspace_invitation(
 
 
 @router.get("/workspace/members", response_model=list[schemas.WorkspaceMemberOut])
+@limiter.limit("60/minute")
 def list_workspace_members(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
