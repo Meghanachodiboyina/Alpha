@@ -1,6 +1,6 @@
 from datetime import date, datetime, time, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, Time, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, String, Text, Time, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -31,6 +31,9 @@ class User(Base):
         foreign_keys="WorkspaceInvite.inviter_user_id",
     )
     preferences = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan")
+    orbit_conversations = relationship("OrbitConversation", back_populates="user", cascade="all, delete-orphan")
+    orbit_task_memories = relationship("OrbitTaskMemory", back_populates="user", cascade="all, delete-orphan")
+    orbit_behavioral_memories = relationship("OrbitBehavioralMemory", back_populates="user", cascade="all, delete-orphan")
 
 class UserPreference(Base):
     __tablename__ = "user_preferences"
@@ -193,3 +196,70 @@ class UserAIUsage(Base):
     __table_args__ = (UniqueConstraint("user_id", "date", name="uq_user_daily_usage"),)
 
     user = relationship("User", back_populates="ai_usages")
+
+
+# ─── Orbit Conversation History ────────────────────────────────────────────
+
+class OrbitConversation(Base):
+    __tablename__ = "orbit_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False, default="New Conversation")
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc), nullable=False)
+
+    user = relationship("User", back_populates="orbit_conversations")
+    messages = relationship("OrbitMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="OrbitMessage.created_at")
+
+
+class OrbitMessage(Base):
+    __tablename__ = "orbit_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("orbit_conversations.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # 'user' | 'orbit'
+    content = Column(Text, nullable=False)
+    # Future-proof message types:
+    # user_message | orbit_message | clarification_question | thinking_state
+    # routine_summary | routine_preview_card | task_recovery_prompt | replan_suggestion | ai_insight
+    message_type = Column(String(50), nullable=False, default="orbit_message")
+    metadata_json = Column(JSON, nullable=True)  # structured payload for rich message types
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
+
+    conversation = relationship("OrbitConversation", back_populates="messages")
+
+
+# ─── Task Memory ───────────────────────────────────────────────────────────
+
+class OrbitTaskMemory(Base):
+    __tablename__ = "orbit_task_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    routine_id = Column(Integer, ForeignKey("routines.id"), nullable=True, index=True)
+    task_title = Column(String(255), nullable=False)
+    task_date = Column(Date, nullable=False, index=True)
+    status = Column(String(20), nullable=False)  # completed | skipped | deferred
+    deferred_to = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
+
+    user = relationship("User", back_populates="orbit_task_memories")
+
+
+# ─── Behavioral Memory ─────────────────────────────────────────────────────
+
+class OrbitBehavioralMemory(Base):
+    __tablename__ = "orbit_behavioral_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    # e.g. 'peak_hours' | 'gym_consistency' | 'study_avoidance' | 'deep_work_preference'
+    pattern_type = Column(String(80), nullable=False, index=True)
+    pattern_data = Column(JSON, nullable=False)  # flexible payload per pattern type
+    updated_at = Column(DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc), nullable=False)
+
+    user = relationship("User", back_populates="orbit_behavioral_memories")
+
+    __table_args__ = (UniqueConstraint("user_id", "pattern_type", name="uq_behavioral_memory_user_pattern"),)
+

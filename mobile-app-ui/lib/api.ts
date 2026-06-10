@@ -16,7 +16,7 @@ const getApiBaseUrl = (): string => {
 export const API_BASE_URL = getApiBaseUrl();
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: any;
   headers?: Record<string, string>;
 };
@@ -95,6 +95,10 @@ class ApiClient {
 
   delete<T = any>(path: string) {
     return this.request<T>(path, { method: 'DELETE' });
+  }
+
+  patch<T = any>(path: string, body?: any) {
+    return this.request<T>(path, { method: 'PATCH', body });
   }
 }
 

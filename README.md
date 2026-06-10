@@ -24,19 +24,8 @@ AutomatedRoutineCreator/
 |   |   |-- project_management_tables.sql
 |   |-- requirements.txt
 |   |-- .env.example
-|-- frontend/
-|   |-- index.html
-|   |-- login.html
-|   |-- register.html
-|   |-- dashboard.html
-|   |-- project_management.html
-|   |-- css/
-|   |   |-- style.css
-|   |-- js/
-|       |-- script.js
-|       |-- auth.js
-|       |-- voice.js
-|       |-- project_management.js
+|-- landing-page/       # Next.js Web Frontend
+|-- mobile-app-ui/      # Expo React Native App
 |-- README.md
 ```
 
@@ -103,17 +92,37 @@ uvicorn app.main:app --reload
 
 6. Open Swagger docs at `http://127.0.0.1:8000/docs`.
 
-### Frontend
+### Web Frontend (Next.js)
 
-1. Open a second terminal in `AutomatedRoutineCreator/frontend`.
-2. Serve the frontend with a static server. Example:
+1. Open a second terminal in `AutomatedRoutineCreator/landing-page`.
+2. Install dependencies:
 
 ```powershell
-python -m http.server 5500
+npm install
 ```
 
-3. Open `http://127.0.0.1:5500/index.html`.
-4. After login, open `http://127.0.0.1:5500/project_management.html` or use the new `Workspace` link in the dashboard sidebar.
+3. Start the development server:
+
+```powershell
+npm run dev
+```
+
+4. Open `http://localhost:3000`.
+
+### Mobile Frontend (Expo)
+
+1. Open a third terminal in `AutomatedRoutineCreator/mobile-app-ui`.
+2. Install dependencies:
+
+```powershell
+npm install
+```
+
+3. Start the Expo server:
+
+```powershell
+npx expo start
+```
 
 ## AI Logic Integration
 
@@ -294,4 +303,4 @@ SQL table creation code for the new project management feature is included in [b
 
 - Update `API_BASE` in the frontend JavaScript files if your backend runs on another host or port.
 - For production, set a strong `SECRET_KEY`, configure a specific `FRONTEND_ORIGIN`, and deploy the frontend behind a web server like Nginx.
-- The current codebase uses simple static HTML, CSS, and JavaScript so it runs easily in VS Code without a build step.
+- The web frontend uses Next.js, and the mobile app uses Expo React Native. Ensure you have Node.js installed.

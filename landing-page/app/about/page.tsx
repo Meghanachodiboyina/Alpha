@@ -49,10 +49,10 @@ const coreTeamMembers = [
     image: "/team/pavan-kumar-duddi.jpg",
   },
   {
-    role: "UI/UX Designer",
+    role: "AI Product Engineer",
     name: "Prakhyath Sai Ponduru",
-    description: "Designs intuitive, user-friendly, and visually appealing experiences that improve usability.",
-    icon: PenTool,
+    description: "Leads AI systems, product design, and user experience — architecting Orbit's planning intelligence and the overall product vision.",
+    icon: Cpu,
     image: "/team/prakhyath-sai-ponduru.jpg",
   },
   {

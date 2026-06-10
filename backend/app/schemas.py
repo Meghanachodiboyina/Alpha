@@ -640,3 +640,81 @@ class UserPreferenceOut(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ─── Orbit Schemas ─────────────────────────────────────────────────────────
+
+class OrbitMessageOut(BaseModel):
+    id: int
+    conversation_id: int
+    role: str
+    content: str
+    message_type: str
+    metadata_json: Optional[dict] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrbitConversationOut(BaseModel):
+    id: int
+    user_id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    messages: list[OrbitMessageOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrbitConversationCreate(BaseModel):
+    title: str = Field(default="New Conversation", max_length=255)
+
+
+class OrbitConversationUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+
+
+class OrbitChatRequest(BaseModel):
+    conversation_id: Optional[int] = None  # None = create new conversation
+    user_message: str = Field(..., min_length=1, max_length=5000)
+    plan_scope: str = Field(default="today")
+    current_time: Optional[str] = None
+    # For Phase 2: clarification answers sent with follow-up
+    clarifications: Optional[dict[str, str]] = None
+    # Internal: indicate this is a follow-up after clarification
+    is_clarification_response: bool = False
+
+
+class OrbitChatResponse(BaseModel):
+    conversation_id: int
+    messages: list[OrbitMessageOut]  # new messages to append to chat
+    routines_created: int = 0
+
+
+class OrbitTaskMemoryCreate(BaseModel):
+    routine_id: Optional[int] = None
+    task_title: str = Field(..., max_length=255)
+    task_date: routine_date
+    status: str  # completed | skipped | deferred
+    deferred_to: Optional[routine_date] = None
+
+
+class OrbitTaskMemoryOut(BaseModel):
+    id: int
+    user_id: str
+    routine_id: Optional[int]
+    task_title: str
+    task_date: routine_date
+    status: str
+    deferred_to: Optional[routine_date]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrbitIncompleteTasksResponse(BaseModel):
+    has_incomplete: bool
+    tasks: list[OrbitTaskMemoryOut]
+    checked_at: datetime
+
