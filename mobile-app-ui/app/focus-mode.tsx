@@ -16,6 +16,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 type FocusModeType = {
   id: string;
   name: string;
+  icon: string;
   emoji: string;
   tagline: string;
   primaryColor: string;
@@ -31,6 +32,7 @@ const FOCUS_MODES: FocusModeType[] = [
     id: 'deep_work',
     name: 'Focus Mode',
     icon: 'zap',
+    emoji: '⚡️',
     tagline: 'High intensity concentration and execute focus.',
     primaryColor: '#ff6b35',
     secondaryColor: '#ff9f7d',
@@ -1024,30 +1026,6 @@ export default function FocusModeScreen() {
                   </View>
                 </View>
               )}
-
-              <View style={[styles.insightRow, { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
-                <View style={[styles.insightIconWrap, { backgroundColor: 'rgba(34,197,94,0.12)' }]}>
-                  <Feather name="trending-up" size={16} color="#22c55e" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.insightTitleText, { color: theme.text }]}>Focus Intensity Peak</Text>
-                  <Text style={[styles.insightDescText, { color: theme.text2 }]}>
-                    Your deep work consistency was 16% higher than your average session. You stayed locked in for the first 30 minutes!
-                  </Text>
-                </View>
-              </View>
-
-              <View style={[styles.insightRow, { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
-                <View style={[styles.insightIconWrap, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
-                  <Feather name="clock" size={16} color="#8b5cf6" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.insightTitleText, { color: theme.text }]}>Best Focus Time: {new Date().getHours() < 12 ? 'Morning' : 'Afternoon'}</Text>
-                  <Text style={[styles.insightDescText, { color: theme.text2 }]}>
-                    This matches your productivity peaks! You generate your best creative work between 9:00 AM and 12:00 PM.
-                  </Text>
-                </View>
-              </View>
 
               <View style={[styles.insightRow, { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
                 <View style={[styles.insightIconWrap, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>

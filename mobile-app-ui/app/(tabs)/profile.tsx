@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
+import api from '@/lib/api';
 
 export default function ProfileScreen() {
   const { theme, isDarkMode, themeMode, setThemeMode } = useTheme();
@@ -25,6 +26,29 @@ export default function ProfileScreen() {
           onPress: async () => {
             await logout();
             router.replace('/(auth)/login');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteAccount = async () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you absolutely sure? This will permanently delete all your data and cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete('/users/me');
+              await logout();
+              router.replace('/(auth)/login');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete account. Please try again later.');
+            }
           },
         },
       ]
@@ -175,8 +199,25 @@ export default function ProfileScreen() {
         </View>
 
         {/* Logout */}
+        {/* Logout */}
         <TouchableOpacity
           onPress={handleLogout}
+          activeOpacity={0.7}
+          style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+            paddingVertical: 16, borderRadius: 14,
+            backgroundColor: theme.surface,
+            borderWidth: 1, borderColor: theme.border,
+            marginBottom: 12,
+          }}
+        >
+          <Feather name="log-out" size={16} color={theme.text2} />
+          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text2 }}>Log Out</Text>
+        </TouchableOpacity>
+
+        {/* Delete Account */}
+        <TouchableOpacity
+          onPress={handleDeleteAccount}
           activeOpacity={0.7}
           style={{
             flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -185,8 +226,8 @@ export default function ProfileScreen() {
             borderWidth: 1, borderColor: 'rgba(239,68,68,0.15)',
           }}
         >
-          <Feather name="log-out" size={16} color="#ef4444" />
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#ef4444' }}>Log Out</Text>
+          <Feather name="trash-2" size={16} color="#ef4444" />
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#ef4444' }}>Delete Account</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

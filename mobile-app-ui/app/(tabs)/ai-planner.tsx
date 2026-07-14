@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, KeyboardAvoidingView, Platform, Animated,
-  AppState, AppStateStatus,
+  View, Text, TextInput, TouchableOpacity,
+  StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,10 +12,15 @@ import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } fr
 import api, { API_BASE_URL } from '../../lib/api';
 import { supabase } from '@/lib/supabase';
 import { ClickUpStyleLoader, FadeInView } from '../../components/PremiumLoader';
-import OrbitMessageBubble, { TypingIndicator, OrbitMsg } from '../../components/orbit/OrbitMessageBubble';
+import { OrbitMsg } from '../../components/orbit/orbitTypes';
+import OrbitChat from '../../components/orbit/OrbitChat';
+import OrbitLanding from '../../components/orbit/OrbitLanding';
 import ConversationDrawer, { ConversationSummary } from '../../components/orbit/ConversationDrawer';
+import { useOrbitStore } from '../../store/orbitStore';
 
 const RECOVERY_CHECKED_KEY = 'orbit_recovery_checked_date';
+
+type AppState = 'welcome' | 'input_focus' | 'chat';
 
 export default function AiPlannerScreen() {
   const { theme } = useTheme();
@@ -28,31 +32,41 @@ export default function AiPlannerScreen() {
   }, []);
 
   if (!isReady) return <ClickUpStyleLoader />;
-  return <FadeInView><OrbitChat theme={theme} /></FadeInView>;
+  return <FadeInView><OrbitChatScreen theme={theme} /></FadeInView>;
 }
 
-function OrbitChat({ theme }: { theme: any }) {
+function OrbitChatScreen({ theme }: { theme: any }) {
   const router = useRouter();
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<any>(null);
+  const inputRef = useRef<TextInput>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   // ─── State ────────────────────────────────────────────────────────────────
-  const [messages, setMessages] = useState<OrbitMsg[]>([]);
+  const store = useOrbitStore();
+  const messages = store.messages;
+  const setMessages = store.setMessages;
+  const activeConversationId = store.conversationId;
+  const setActiveConversationId = store.setConversationId;
+  const isTyping = store.isThinking;
+  const setIsTyping = store.setIsThinking;
+
   const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [isInputFocused, setIsInputFocused] = useState(false);
 
-  // Pending clarifications state (for follow-up responses)
-  const [pendingClarificationMsg, setPendingClarificationMsg] = useState<string | null>(null);
+  // Pending clarifications state
 
-  // Animations for initial state → chat transition
-  const headerOpacity = useRef(new Animated.Value(1)).current;
-  const headerTranslateY = useRef(new Animated.Value(0)).current;
-  const [hasStarted, setHasStarted] = useState(false);
+
+  // UI State mapping
+  let appState: AppState = 'welcome';
+  if (messages.length > 0 || isTyping) {
+    appState = 'chat';
+  } else if (isInputFocused) {
+    appState = 'input_focus';
+  }
 
   // ─── Load conversations on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -64,12 +78,9 @@ function OrbitChat({ theme }: { theme: any }) {
     try {
       const data = await api.get('/orbit/conversations');
       setConversations(data);
-    } catch (e) {
-      // silently fail — user can still use Orbit
-    }
+    } catch (e) {}
   };
 
-  // ─── Once-per-day incomplete task check ──────────────────────────────────
   const checkIncompleteTasksOnce = async () => {
     const today = new Date().toDateString();
     const lastChecked = await AsyncStorage.getItem(RECOVERY_CHECKED_KEY);
@@ -79,7 +90,6 @@ function OrbitChat({ theme }: { theme: any }) {
       const data = await api.get('/orbit/incomplete-tasks');
       await AsyncStorage.setItem(RECOVERY_CHECKED_KEY, today);
       if (data.has_incomplete && data.tasks.length > 0) {
-        // Inject recovery prompt as first message
         const recoveryMsg: OrbitMsg = {
           id: 'recovery-' + Date.now(),
           role: 'orbit',
@@ -88,23 +98,9 @@ function OrbitChat({ theme }: { theme: any }) {
           metadata_json: { tasks: data.tasks },
         };
         setMessages([recoveryMsg]);
-        // If we show recovery, mark as started so chat UI shows
-        transitionToChat();
       }
-    } catch (e) {
-      // silently fail
-    }
+    } catch (e) {}
   };
-
-  // ─── Header fade-out transition ───────────────────────────────────────────
-  const transitionToChat = useCallback(() => {
-    if (hasStarted) return;
-    setHasStarted(true);
-    Animated.parallel([
-      Animated.timing(headerOpacity, { toValue: 0, duration: 350, useNativeDriver: true }),
-      Animated.timing(headerTranslateY, { toValue: -40, duration: 350, useNativeDriver: true }),
-    ]).start();
-  }, [hasStarted]);
 
   // ─── Load a specific conversation ─────────────────────────────────────────
   const loadConversation = async (id: number) => {
@@ -112,15 +108,9 @@ function OrbitChat({ theme }: { theme: any }) {
       const data = await api.get(`/orbit/conversations/${id}`);
       setActiveConversationId(id);
       const msgs: OrbitMsg[] = (data.messages || []).map((m: any) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        message_type: m.message_type,
-        metadata_json: m.metadata_json,
-        created_at: m.created_at,
+        ...m,
       }));
       setMessages(msgs);
-      if (msgs.length > 0) transitionToChat();
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
     } catch (e) {
       setError('Failed to load conversation.');
@@ -131,99 +121,99 @@ function OrbitChat({ theme }: { theme: any }) {
   const startNewConversation = () => {
     setActiveConversationId(null);
     setMessages([]);
-    setHasStarted(false);
-    headerOpacity.setValue(1);
-    headerTranslateY.setValue(0);
     setInputText('');
     setError('');
   };
 
   // ─── Send message ─────────────────────────────────────────────────────────
-  const sendMessage = async (text?: string, clarifications?: Record<string, string>, originalMsg?: string) => {
+  const sendMessage = async (text?: string) => {
     const userText = (text || inputText).trim();
     if (!userText) return;
 
-    // Add user bubble immediately
     const localUserMsg: OrbitMsg = {
       id: 'local-' + Date.now(),
       role: 'user',
       content: userText,
       message_type: 'user_message',
     };
-    setMessages(prev => [...prev, localUserMsg]);
+    if (userText) {
+      setMessages([...messages, localUserMsg]);
+    }
     setInputText('');
     setError('');
-    transitionToChat();
 
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
     setIsTyping(true);
+    store.setStatus('GENERATING');
 
     try {
       const now = new Date();
       const tzOffset = now.getTimezoneOffset() * 60000;
       const localISO = new Date(now.getTime() - tzOffset).toISOString().slice(0, -1);
 
+      let enrichedPayloadText = userText;
+      if (!activeConversationId) {
+        const recoveryMsg = messages.find((m) => m.message_type === 'task_recovery_prompt');
+        if (recoveryMsg?.metadata_json?.tasks) {
+          const taskTitles = recoveryMsg.metadata_json.tasks.map((t: any) => t.task_title).join(', ');
+          enrichedPayloadText = `${userText}\n\n[System Context: Uncompleted tasks from yesterday: ${taskTitles}. Include these if the user agrees.]`;
+        }
+      }
+
+
       const payload: any = {
         conversation_id: activeConversationId,
-        user_message: userText,
+        user_message: enrichedPayloadText,
         plan_scope: 'today',
         current_time: localISO,
+        is_clarification_response: store.status === 'WAITING_FOR_CLARIFICATION'
       };
-
-      if (clarifications) {
-        payload.is_clarification_response = true;
-        payload.clarifications = clarifications;
-      }
 
       const response = await api.post('/orbit/chat', payload);
 
       setIsTyping(false);
-
-      const newMsgs: OrbitMsg[] = (response.messages || []).map((m: any) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        message_type: m.message_type,
-        metadata_json: m.metadata_json,
-        created_at: m.created_at,
-      }));
-
-      // Update conversation ID if new
-      if (response.conversation_id && !activeConversationId) {
-        setActiveConversationId(response.conversation_id);
-        loadConversations(); // refresh sidebar list
+      if (response.status) {
+        store.setStatus(response.status);
+      } else {
+        store.setStatus('COMPLETE');
       }
 
-      // Replace the local user msg with server-persisted messages
-      setMessages(prev => {
-        const withoutLocal = prev.filter(m => m.id !== localUserMsg.id);
-        return [...withoutLocal, ...newMsgs];
-      });
+      const newMsgs: OrbitMsg[] = (response.messages || []).map((m: any) => ({
+        ...m,
+      }));
+
+      if (response.conversation_id && !activeConversationId) {
+        setActiveConversationId(response.conversation_id);
+        loadConversations();
+      }
+
+      if (userText) {
+        setMessages([...messages.filter(m => m.id !== localUserMsg.id), ...newMsgs]);
+      } else {
+        setMessages([...messages, ...newMsgs]);
+      }
 
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 150);
     } catch (e: any) {
       setIsTyping(false);
+      store.setStatus('ERROR');
       const errMsg: OrbitMsg = {
         id: 'err-' + Date.now(),
         role: 'orbit',
         content: e.message || 'Something went wrong. Please try again.',
         message_type: 'orbit_message',
       };
-      setMessages(prev => {
-        const withoutLocal = prev.filter(m => m.id !== localUserMsg.id);
-        return [...withoutLocal, errMsg];
-      });
+      if (userText) {
+         setMessages([...messages.filter(m => m.id !== localUserMsg.id), errMsg]);
+      } else {
+         setMessages([...messages, errMsg]);
+      }
     }
   };
 
-  // ─── Clarification answer handler ──────────────────────────────────────────
-  const handleClarificationAnswer = (clarifications: Record<string, string>, originalContent: string) => {
-    sendMessage(pendingClarificationMsg || originalContent, clarifications);
-    setPendingClarificationMsg(null);
-  };
 
-  // ─── Recovery action handler ───────────────────────────────────────────────
+
   const handleRecoveryAction = async (action: 'today' | 'weekend' | 'dismiss', tasks: any[]) => {
     const taskNames = tasks.slice(0, 5).map((t: any) => t.task_title).join(', ');
     if (action === 'dismiss') {
@@ -233,7 +223,7 @@ function OrbitChat({ theme }: { theme: any }) {
         content: "Got it! I've cleared those tasks. Let me know what you'd like to plan next.",
         message_type: 'orbit_message',
       };
-      setMessages(prev => [...prev, dismissMsg]);
+      setMessages([...messages, dismissMsg] as any);
       return;
     }
 
@@ -283,10 +273,7 @@ function OrbitChat({ theme }: { theme: any }) {
         setIsTyping(false);
         if (xhr.status === 200) {
           const responseData = JSON.parse(xhr.responseText);
-          if (responseData.text) {
-            // Send transcript directly as a message
-            sendMessage(responseData.text);
-          }
+          if (responseData.text) sendMessage(responseData.text);
         } else {
           setError('Failed to transcribe. Please try again.');
         }
@@ -299,7 +286,6 @@ function OrbitChat({ theme }: { theme: any }) {
     }
   };
 
-  // ─── Conversation management ───────────────────────────────────────────────
   const handleRenameConversation = async (id: number, newTitle: string) => {
     try {
       await api.patch(`/orbit/conversations/${id}`, { title: newTitle });
@@ -315,94 +301,54 @@ function OrbitChat({ theme }: { theme: any }) {
     } catch { setError('Failed to delete.'); }
   };
 
-  // ─── Suggestion chips (initial state) ────────────────────────────────────
-  const suggestions = [
-    '📚 Study SQL, gym at 6 PM, buy groceries',
-    '🧘 Morning meditation, team standup 10 AM, deep work',
-    '🏃 Wake 6 AM, jog, office by 9, finish project by 5',
-  ];
-
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: '#050505' }]} edges={['top']}>
-      {/* Top Nav */}
-      <View style={s.topNav}>
-        <TouchableOpacity style={s.navBtn} onPress={() => setDrawerOpen(true)}>
-          <Feather name="clock" size={18} color={theme.text} />
-        </TouchableOpacity>
-
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>Orbit</Text>
-          <Text style={{ fontSize: 13, color: theme.orange }}>✦</Text>
+      
+      {/* Top Header */}
+      {appState !== 'input_focus' && (
+        <View style={s.topNav}>
+          <TouchableOpacity style={s.navBtn} onPress={() => setDrawerOpen(true)}>
+            <Feather name="clock" size={18} color={theme.text} />
+          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>Orbit</Text>
+            <Text style={{ fontSize: 13, color: theme.orange }}>✦</Text>
+          </View>
+          <TouchableOpacity style={s.navBtn} onPress={startNewConversation}>
+            <Feather name="plus-square" size={18} color={theme.text} />
+          </TouchableOpacity>
         </View>
-
-        <TouchableOpacity style={s.navBtn} onPress={startNewConversation}>
-          <Feather name="plus-square" size={18} color={theme.text} />
-        </TouchableOpacity>
-      </View>
+      )}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        {/* Initial Hero State */}
-        {!hasStarted && (
-          <Animated.View
-            style={[
-              s.heroContainer,
-              { opacity: headerOpacity, transform: [{ translateY: headerTranslateY }] },
-            ]}
-            pointerEvents={hasStarted ? 'none' : 'auto'}
-          >
-            <Text style={s.orbitTitle}>
-              Orbit <Text style={{ color: theme.orange }}>✦</Text>
-            </Text>
-            <Text style={s.orbitSubtitle}>
-              Your AI planner for a better, balanced day.
-            </Text>
-
-            {/* Suggestion chips */}
-            <View style={{ marginTop: 28, width: '100%', gap: 10 }}>
-              {suggestions.map((sug, i) => (
-                <TouchableOpacity
-                  key={i}
-                  style={[s.suggestionChip, { backgroundColor: theme.cardBg, borderColor: theme.border }]}
-                  onPress={() => sendMessage(sug.replace(/^[^\s]+\s/, ''))}
-                  activeOpacity={0.7}
-                >
-                  <Text style={{ fontSize: 13, color: theme.text2, lineHeight: 18 }}>{sug}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </Animated.View>
+        {appState === 'chat' ? (
+          <OrbitChat
+            messages={messages}
+            theme={theme}
+            flatListRef={flatListRef}
+            status={store.status}
+            isThinking={store.isThinking}
+            onRecoveryAction={handleRecoveryAction}
+          />
+        ) : (
+          <OrbitLanding
+            theme={theme}
+            isInputFocused={appState === 'input_focus'}
+            onSuggestionPress={(text) => {
+              setInputText(text);
+              setTimeout(() => {
+                inputRef.current?.focus();
+              }, 50);
+            }}
+          />
         )}
 
-        {/* Chat Messages */}
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={[s.messageList, !hasStarted && { opacity: 0 }]}
-          showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          renderItem={({ item }) => (
-            <OrbitMessageBubble
-              message={item}
-              theme={theme}
-              onClarificationAnswer={(answers, _) => {
-                // Track which message was the user's original prompt
-                const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-                setPendingClarificationMsg(lastUserMsg?.content || null);
-                handleClarificationAnswer(answers, item.content);
-              }}
-              onRecoveryAction={handleRecoveryAction}
-            />
-          )}
-          ListFooterComponent={isTyping ? <TypingIndicator theme={theme} /> : null}
-        />
-
-        {/* Error */}
+        {/* Error Banner */}
         {error ? (
           <View style={s.errorBanner}>
             <Text style={{ fontSize: 12, color: '#ef4444' }}>{error}</Text>
@@ -426,6 +372,7 @@ function OrbitChat({ theme }: { theme: any }) {
           </TouchableOpacity>
 
           <TextInput
+            ref={inputRef}
             style={[s.textInput, { color: theme.text }]}
             placeholder={isRecording ? 'Listening...' : 'Tell me what you need to do...'}
             placeholderTextColor={isRecording ? theme.orange : theme.text3}
@@ -433,6 +380,8 @@ function OrbitChat({ theme }: { theme: any }) {
             maxLength={2000}
             value={inputText}
             onChangeText={setInputText}
+            onFocus={() => setIsInputFocused(true)}
+            onBlur={() => setIsInputFocused(false)}
             editable={!isRecording}
           />
 
@@ -459,7 +408,7 @@ function OrbitChat({ theme }: { theme: any }) {
         theme={theme}
         onClose={() => setDrawerOpen(false)}
         onSelect={loadConversation}
-        onNew={() => { startNewConversation(); }}
+        onNew={() => { startNewConversation(); setDrawerOpen(false); }}
         onRename={handleRenameConversation}
         onDelete={handleDeleteConversation}
       />
@@ -472,36 +421,13 @@ const s = StyleSheet.create({
   topNav: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   navBtn: {
     width: 36, height: 36, borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center', justifyContent: 'center',
   },
-
-  heroContainer: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 80,
-    alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 24,
-    zIndex: 10,
-  },
-  orbitTitle: {
-    fontSize: 44, fontWeight: '800', color: '#fff',
-    letterSpacing: -2, marginBottom: 8,
-  },
-  orbitSubtitle: {
-    fontSize: 14, color: 'rgba(255,255,255,0.4)',
-    textAlign: 'center', lineHeight: 20,
-  },
-  suggestionChip: {
-    borderWidth: 1, borderRadius: 14,
-    paddingVertical: 12, paddingHorizontal: 14,
-  },
-
-  messageList: {
-    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, flexGrow: 1,
-  },
-
   errorBanner: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginHorizontal: 16, marginBottom: 6,
@@ -509,7 +435,6 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)',
     borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
   },
-
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 10,
     marginHorizontal: 12, marginBottom: 12,

@@ -138,6 +138,7 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen name="analytics" options={{ href: null }} />
+        <Tabs.Screen name="history" options={{ href: null }} />
       </Tabs>
       <RadialMenuOverlay isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
     </View>
