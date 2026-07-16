@@ -14,12 +14,14 @@ import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardScreen() {
-  const { theme, themeMode } = useTheme();
-  const isDark = themeMode === 'dark' || (themeMode === 'system' && true); // approximation; real value below
+  const { theme, isDarkMode } = useTheme();
+  const isDark = isDarkMode;
   const isLight = !isDark;
 
   const [stats, setStats] = useState<any>(null);
-  const [routines, setRoutines] = useState<any[]>([]);
+  const [plannerSections, setPlannerSections] = useState<{ today: any[]; upcoming: any[]; completed: any[] }>({
+    today: [], upcoming: [], completed: [],
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [splashDone, setSplashDone] = useState(!appState.justLoggedIn);
@@ -74,15 +76,21 @@ export default function DashboardScreen() {
 
   const fetchData = async () => {
     try {
-      const [statsData, routinesData] = await Promise.all([
-        api.get('/dashboard/stats?weeks=3'),
-        api.get('/routines'),
+      const [statsData, plannerData] = await Promise.all([
+        api.get('/dashboard/stats?weeks=1'),
+        api.get('/routines/planner'),
       ]);
       setStats(statsData);
-      setRoutines(routinesData.slice(0, 6));
+      setPlannerSections({
+        today: plannerData.today || [],
+        upcoming: plannerData.upcoming || [],
+        completed: plannerData.completed || [],
+      });
     } catch (err: any) {
       if (err.status === 401) {
         router.replace('/(auth)/login');
+      } else {
+        Alert.alert("Network Error", "Failed to fetch dashboard data.");
       }
     } finally {
       setLoading(false);
@@ -100,12 +108,20 @@ export default function DashboardScreen() {
     const newStatus = currentStatus === 'Completed' ? 'Pending' : 'Completed';
     try {
       await api.put(`/routines/${id}`, { status: newStatus });
-      setRoutines(prev =>
-        prev.map(r => r.id === id ? { ...r, status: newStatus } : r)
-      );
-      const statsData = await api.get('/dashboard/stats?weeks=3');
+      // Re-fetch both stats and planner so metrics stay accurate
+      const [statsData, plannerData] = await Promise.all([
+        api.get('/dashboard/stats?weeks=1'),
+        api.get('/routines/planner'),
+      ]);
       setStats(statsData);
-    } catch {}
+      setPlannerSections({
+        today: plannerData.today || [],
+        upcoming: plannerData.upcoming || [],
+        completed: plannerData.completed || [],
+      });
+    } catch (error) {
+      Alert.alert("Network Error", "Failed to fetch planner sections.");
+    }
   };
 
   const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'there';
@@ -118,21 +134,33 @@ export default function DashboardScreen() {
       ? { icon: 'zap', text: 'Protect your deep work time — stay in the zone!', accent: theme.orange }
       : { icon: 'moon', text: 'Wind down and plan tomorrow — you earned it!', accent: theme.purple };
 
+  // ── Metric derivations (all date-scoped from new API fields) ────────────────
   const productivity = stats?.productivity_score ?? 0;
-  const totalRoutines = stats?.total_routines ?? 0;
-  const completedRoutines = stats?.completed_routines ?? 0;
-  const pendingRoutines = stats?.pending_routines ?? 0;
+
+  // Today's metrics
+  const todayTotal = stats?.today_total ?? 0;
+  const todayCompleted = stats?.today_completed ?? 0;
+  const todayPending = stats?.today_pending ?? 0;
+
+  // This week's metrics (Productivity card)
+  const weekTotal = stats?.week_total ?? 0;
+  const weekCompleted = stats?.week_completed ?? 0;
+  const weekPending = stats?.week_pending ?? 0;
+
+  // Legacy aliases still used in Productivity card stat rows
+  const totalRoutines = weekTotal;
+  const completedRoutines = weekCompleted;
+  const pendingRoutines = weekPending;
 
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
-  // Determine today's focus routine (first pending routine)
-  const todayStr = new Date().toISOString().split('T')[0];
-  const pendingToday = routines.filter(r => r.status === 'Pending' && r.date === todayStr);
-  const focusRoutine = pendingToday.length > 0 ? pendingToday[0] : null;
+  // Focus routine = first pending task from TODAY only (from planner API)
+  const todayRoutines = plannerSections.today;
+  const focusRoutine = todayRoutines.find((r: any) => r.status === 'Pending') ?? null;
 
-  // Up next: remaining pending routines (exclude focus one)
-  const upNextRoutines = routines
-    .filter(r => r.status === 'Pending' && (focusRoutine ? r.id !== focusRoutine.id : true))
+  // Up Next = remaining pending today tasks (excluding the focus one), limited to 4
+  const upNextRoutines = todayRoutines
+    .filter((r: any) => r.status === 'Pending' && (focusRoutine ? r.id !== focusRoutine.id : true))
     .slice(0, 4);
 
   const getCategoryIcon = (category?: string) => {
@@ -156,8 +184,6 @@ export default function DashboardScreen() {
       default: return theme.text3;
     }
   };
-
-  const isDarkMode = themeMode === 'dark' || (themeMode === 'system');
 
   const renderContent = () => {
     if (loading && !refreshing) {
@@ -211,88 +237,6 @@ export default function DashboardScreen() {
                 <Feather name="search" size={17} color={searchOpen ? theme.orange : theme.text2} />
               </TouchableOpacity>
 
-              {/* Notifications Bell */}
-              <View>
-                <TouchableOpacity
-                  onPress={() => { setNotificationsOpen(!notificationsOpen); setSearchOpen(false); }}
-                  activeOpacity={0.7}
-                  style={{
-                    width: 40, height: 40, borderRadius: 12,
-                    backgroundColor: notificationsOpen ? theme.orangeLight : theme.surface,
-                    borderWidth: 1, borderColor: notificationsOpen ? theme.orange : theme.border,
-                    alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <Feather name="bell" size={17} color={notificationsOpen ? theme.orange : theme.text2} />
-                  {unreadCount > 0 && (
-                    <View style={{
-                      position: 'absolute', top: -4, right: -4,
-                      minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5,
-                      backgroundColor: theme.orange, alignItems: 'center', justifyContent: 'center',
-                      borderWidth: 2, borderColor: theme.bg,
-                    }}>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: '#fff' }}>{unreadCount}</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-
-                {/* Notification Popover */}
-                {notificationsOpen && (
-                  <View style={{
-                    position: 'absolute', top: 48, right: 0, width: 280,
-                    backgroundColor: theme.cardBg, borderWidth: 1, borderColor: theme.border,
-                    borderRadius: 16, overflow: 'hidden', zIndex: 100,
-                    shadowColor: '#000', shadowOffset: { width: 0, height: 12 },
-                    shadowOpacity: 0.25, shadowRadius: 40,
-                  }}>
-                    <View style={{
-                      paddingHorizontal: 16, paddingVertical: 14,
-                      borderBottomWidth: 1, borderBottomColor: theme.border,
-                      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                    }}>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>Notifications</Text>
-                      <TouchableOpacity onPress={() => setNotificationsOpen(false)}>
-                        <Feather name="x" size={16} color={theme.text3} />
-                      </TouchableOpacity>
-                    </View>
-
-                    {notifications.length === 0 ? (
-                      <View style={{ padding: 32, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 14, color: theme.text3 }}>No notifications yet.</Text>
-                      </View>
-                    ) : notifications.map(notif => (
-                      <View key={notif.id} style={{
-                        paddingHorizontal: 16, paddingVertical: 14,
-                        borderBottomWidth: 1, borderBottomColor: theme.border,
-                        flexDirection: 'row', gap: 12, alignItems: 'flex-start',
-                        backgroundColor: notif.read ? 'transparent' : 'rgba(255,107,53,0.03)',
-                      }}>
-                        <View style={{
-                          width: 36, height: 36, borderRadius: 10,
-                          backgroundColor: notif.type === 'alert' ? 'rgba(239,68,68,0.1)' : theme.surface,
-                          alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          <Feather name={notif.type === 'alert' ? 'alert-circle' : 'send'} size={18} color={notif.type === 'alert' ? '#ef4444' : theme.orange} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{notif.title}</Text>
-                            <Text style={{ fontSize: 11, color: theme.text3 }}>{notif.time}</Text>
-                          </View>
-                          <Text style={{ fontSize: 13, color: theme.text2, lineHeight: 19 }}>{notif.message}</Text>
-                        </View>
-                        <TouchableOpacity
-                          onPress={() => setNotifications(prev => prev.filter(n => n.id !== notif.id))}
-                          style={{ padding: 4 }}
-                          activeOpacity={0.7}
-                        >
-                          <Feather name="x" size={14} color={theme.text3} />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
             </View>
           </View>
 
@@ -591,10 +535,15 @@ export default function DashboardScreen() {
 
             {/* Stats */}
             <View style={{ flex: 1, gap: 8 }}>
+              {/* Today sub-header inside Productivity card */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: theme.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Today</Text>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: theme.text3 }}>{todayCompleted}/{todayTotal}</Text>
+              </View>
               {[
-                { label: 'Completed', value: completedRoutines, icon: 'check-circle', color: theme.green },
-                { label: 'Pending', value: pendingRoutines, icon: 'clock', color: theme.amber },
-                { label: 'Total', value: totalRoutines, icon: 'layers', color: theme.blue },
+                { label: 'Done this week', value: weekCompleted, icon: 'check-circle', color: theme.green },
+                { label: 'Pending this week', value: weekPending, icon: 'clock', color: theme.amber },
+                { label: 'Total this week', value: weekTotal, icon: 'layers', color: theme.blue },
               ].map(s => (
                 <View key={s.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <View style={{

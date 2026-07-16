@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -26,7 +26,7 @@ def create_user(db: Session, name: str, email: str, password_hash: str):
     return user
 
 
-def create_routine(db: Session, user_id: str, routine: schemas.RoutineCreate):
+def create_routine(db: Session, user_id: str, routine: schemas.RoutineCreate, session_id: int = None):
     routine_data = routine.model_dump()
     if not routine_data.get("suggestion"):
         routine_data["suggestion"] = generate_task_suggestion(
@@ -34,6 +34,9 @@ def create_routine(db: Session, user_id: str, routine: schemas.RoutineCreate):
             routine_data.get("description"),
             routine_data.get("priority", "Medium"),
         )
+    # session_id passed explicitly takes precedence over anything in the payload
+    if session_id is not None:
+        routine_data["session_id"] = session_id
     db_routine = models.Routine(user_id=user_id, **routine_data)
     db.add(db_routine)
     db.commit()
@@ -41,13 +44,256 @@ def create_routine(db: Session, user_id: str, routine: schemas.RoutineCreate):
     return db_routine
 
 
+def create_routine_session(
+    db: Session,
+    user_id: str,
+    scheduled_for: date,
+    conversation_id: int = None,
+) -> models.RoutineSession:
+    session = models.RoutineSession(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        scheduled_for=scheduled_for,
+        status="active",
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+# ─── Orbit Session Memory helpers ────────────────────────────────────────────
+
+def create_orbit_session(
+    db: Session,
+    user_id: str,
+    conversation_id: int | None = None,
+) -> models.OrbitSession:
+    """Create a brand-new planning session for a conversation."""
+    os = models.OrbitSession(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        status="active",
+        current_state="WAITING_FOR_INPUT",
+        context_json={
+            "goal": None,
+            "tasks": [],
+            "duration": None,
+            "fixed_events": [],
+            "constraints": [],
+            "pending_question": None,
+            "pending_question_key": None,
+            "generated_routines": [],
+        },
+    )
+    db.add(os)
+    db.commit()
+    db.refresh(os)
+    return os
+
+
+def load_orbit_session(
+    db: Session,
+    user_id: str,
+    conversation_id: int,
+) -> models.OrbitSession | None:
+    """Load the active OrbitSession for a given conversation."""
+    return (
+        db.query(models.OrbitSession)
+        .filter(
+            models.OrbitSession.user_id == user_id,
+            models.OrbitSession.conversation_id == conversation_id,
+            models.OrbitSession.status == "active",
+        )
+        .order_by(models.OrbitSession.created_at.desc())
+        .first()
+    )
+
+
+def get_or_create_orbit_session(
+    db: Session,
+    user_id: str,
+    conversation_id: int,
+) -> models.OrbitSession:
+    """Idempotent: load existing active session or create a new one."""
+    existing = load_orbit_session(db, user_id, conversation_id)
+    if existing:
+        return existing
+    return create_orbit_session(db, user_id, conversation_id)
+
+
+def update_orbit_context(
+    db: Session,
+    session: models.OrbitSession,
+    updates: dict,
+) -> models.OrbitSession:
+    """
+    Merge `updates` into session.context_json and persist.
+    Existing keys not in `updates` are preserved.
+    """
+    current = dict(session.context_json or {})
+    current.update(updates)
+    session.context_json = current
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def update_orbit_state(
+    db: Session,
+    session: models.OrbitSession,
+    new_state: str,
+) -> models.OrbitSession:
+    """Update the state machine position and persist."""
+    session.current_state = new_state
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def clear_completed_session(
+    db: Session,
+    session: models.OrbitSession,
+) -> models.OrbitSession:
+    """Mark the session as complete (does NOT delete it — keeps history)."""
+    session.status = "complete"
+    session.current_state = "COMPLETE"
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+
+
 def get_routines(db: Session, user_id: str):
+    """Returns ALL non-internal routines (used for legacy endpoints)."""
     return (
         db.query(models.Routine)
         .filter(models.Routine.user_id == user_id, models.Routine.is_internal == False)
         .order_by(models.Routine.date.asc(), models.Routine.start_time.asc())
         .all()
     )
+
+
+def get_routines_by_date(db: Session, user_id: str, for_date: date):
+    """Returns routines scheduled for a specific date (date-filtered Planner view)."""
+    return (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id,
+            models.Routine.is_internal == False,
+            models.Routine.date == for_date,
+        )
+        .order_by(models.Routine.start_time.asc())
+        .all()
+    )
+
+
+def get_scheduled_blocks_for_date(db: Session, user_id: str, target_date: date) -> list[tuple[datetime, datetime]]:
+    """
+    Return the user's already-scheduled, still-active routine blocks for a date
+    as (start_datetime, end_datetime) tuples. Fed to the AI planner so newly
+    generated tasks slot into free gaps instead of overlapping existing ones.
+    """
+    blocks: list[tuple[datetime, datetime]] = []
+    for r in get_routines_by_date(db, user_id, target_date):
+        if r.status in ("Completed", "Skipped", "Missed"):
+            continue
+        if not r.start_time or not r.end_time:
+            continue
+        start_dt = datetime.combine(target_date, r.start_time)
+        end_dt = datetime.combine(target_date, r.end_time)
+        if end_dt > start_dt:
+            blocks.append((start_dt, end_dt))
+    blocks.sort(key=lambda b: b[0])
+    return blocks
+
+
+def get_overdue_routine_titles(db: Session, user_id: str, limit: int = 10) -> list[str]:
+    """Titles of the user's past, still-incomplete routines (the 'Overdue' list)."""
+    rows = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id,
+            models.Routine.is_internal == False,
+            models.Routine.date < date.today(),
+            models.Routine.status != "Completed",
+        )
+        .order_by(models.Routine.date.asc())
+        .limit(limit)
+        .all()
+    )
+    seen, titles = set(), []
+    for r in rows:
+        t = (r.title or "").strip()
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            titles.append(t)
+    return titles
+
+
+def get_routines_sections(db: Session, user_id: str):
+    """Returns routines bucketed into today, upcoming, and completed sections using optimized queries."""
+    today = date.today()
+    
+    # 1. Today's Pending/Skipped/Partial tasks
+    today_routines = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id, 
+            models.Routine.is_internal == False,
+            models.Routine.date == today,
+            models.Routine.status != "Completed"
+        )
+        .order_by(models.Routine.start_time.asc())
+        .all()
+    )
+    
+    # 2. Upcoming tasks (Tomorrow onwards)
+    upcoming_routines = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id, 
+            models.Routine.is_internal == False,
+            models.Routine.date > today,
+            models.Routine.status != "Completed"
+        )
+        .order_by(models.Routine.date.asc(), models.Routine.start_time.asc())
+        .all()
+    )
+    
+    # 3. ONLY Today's Completed tasks (Historical tasks moved to /history API)
+    completed_routines = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id, 
+            models.Routine.is_internal == False,
+            models.Routine.date == today,
+            models.Routine.status == "Completed"
+        )
+        .order_by(models.Routine.start_time.asc())
+        .all()
+    )
+    
+    # 4. Overdue tasks (Past incomplete tasks)
+    overdue_routines = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id, 
+            models.Routine.is_internal == False,
+            models.Routine.date < today,
+            models.Routine.status != "Completed"
+        )
+        .order_by(models.Routine.date.asc(), models.Routine.start_time.asc())
+        .all()
+    )
+    
+    return {
+        "overdue": overdue_routines,
+        "today": today_routines,
+        "upcoming": upcoming_routines,
+        "completed": completed_routines,
+    }
 
 
 def get_weekly_routines(db: Session, user_id: str):
@@ -147,6 +393,70 @@ def update_routine(db: Session, db_routine: models.Routine, routine_update: sche
     db.refresh(db_routine)
     return db_routine
 
+
+def check_routine_conflict(
+    db: Session,
+    user_id: str,
+    routine_id: int,
+    new_start: time | None,
+    new_end: time | None,
+    target_date: date | None,
+) -> list[models.Routine]:
+    """Returns any routines that overlap with the proposed new time slot."""
+    if not new_start or not new_end:
+        return []
+    check_date = target_date or date.today()
+    conflicts = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id,
+            models.Routine.id != routine_id,
+            models.Routine.date == check_date,
+            models.Routine.start_time < new_end,
+            models.Routine.end_time > new_start,
+        )
+        .all()
+    )
+    return conflicts
+
+
+def get_daily_review(db: Session, user_id: str, review_date: date | None = None):
+    """Compute today's execution stats: completed, skipped, partial, carry-forward."""
+    target_date = review_date or date.today()
+    routines = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id,
+            models.Routine.date == target_date,
+            models.Routine.is_internal == False,
+        )
+        .all()
+    )
+    completed = [r for r in routines if r.status == "Completed"]
+    skipped = [r for r in routines if r.status == "Skipped"]
+    partial = [r for r in routines if r.status == "Partial"]
+    pending = [r for r in routines if r.status == "Pending"]
+
+    focus_minutes = sum(
+        (r.actual_duration or r.estimated_time) for r in completed + partial
+        if (r.category or "").lower() not in ("recovery", "commute", "meal", "break")
+    )
+    recovery_minutes = sum(
+        r.estimated_time for r in routines
+        if (r.category or "").lower() in ("recovery", "break") and r.status == "Completed"
+    )
+    carry_forward = skipped + partial + pending
+    return {
+        "completed_count": len(completed),
+        "skipped_count": len(skipped),
+        "partial_count": len(partial),
+        "pending_count": len(pending),
+        "total_focus_minutes": focus_minutes,
+        "total_recovery_minutes": recovery_minutes,
+        "carry_forward": carry_forward,
+    }
+
+
 def upsert_user_preference(db: Session, user_id: str, category: str, value: str):
     db_pref = db.query(models.UserPreference).filter_by(user_id=user_id, category=category).first()
     if db_pref:
@@ -189,63 +499,136 @@ def create_many_routines(db: Session, user_id: str, routines: list[schemas.AIPla
     return created_items
 
 
+def get_completion_rate(completed: int, total: int) -> float:
+    """Safe float completion rate 0.0 – 1.0."""
+    if total == 0:
+        return 0.0
+    return round(completed / total, 4)
+
+
+def get_today_stats(db: Session, user_id: str) -> dict:
+    """
+    Returns routine counts scoped strictly to today's date.
+    Uses date.today() which reflects the server's local date.
+    """
+    today = date.today()
+    base = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id,
+            models.Routine.date == today,
+            models.Routine.is_internal == False,
+        )
+    )
+    total = base.count()
+    completed = base.filter(models.Routine.status == "Completed").count()
+    pending = total - completed
+    return {"total": total, "completed": completed, "pending": pending, "date": today}
+
+
+def get_week_stats(db: Session, user_id: str) -> dict:
+    """
+    Returns routine counts for the current calendar week
+    (Monday 00:00 → Sunday 23:59 in server-local time).
+    """
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())   # Monday
+    week_end = week_start + timedelta(days=6)              # Sunday
+
+    base = (
+        db.query(models.Routine)
+        .filter(
+            models.Routine.user_id == user_id,
+            models.Routine.date >= week_start,
+            models.Routine.date <= week_end,
+            models.Routine.is_internal == False,
+        )
+    )
+    total = base.count()
+    completed = base.filter(models.Routine.status == "Completed").count()
+    pending = total - completed
+    return {
+        "total": total,
+        "completed": completed,
+        "pending": pending,
+        "week_start": week_start,
+        "week_end": week_end,
+    }
+
+
 def get_dashboard_stats(db: Session, user_id: str, weeks: int = 1):
-    total_routines = (
-        db.query(func.count(models.Routine.id))
-        .filter(models.Routine.user_id == user_id, models.Routine.is_internal == False)
-        .scalar()
-        or 0
-    )
-    completed_routines = (
-        db.query(func.count(models.Routine.id))
-        .filter(models.Routine.user_id == user_id, models.Routine.status == "Completed", models.Routine.is_internal == False)
-        .scalar()
-        or 0
-    )
-    pending_routines = total_routines - completed_routines
-    today_routines = (
-        db.query(func.count(models.Routine.id))
-        .filter(models.Routine.user_id == user_id, models.Routine.date == date.today(), models.Routine.is_internal == False)
-        .scalar()
-        or 0
-    )
+    # ── Scoped stats ──────────────────────────────────────────────────────────
+    today_s = get_today_stats(db, user_id)
+    week_s = get_week_stats(db, user_id)
 
-    productivity_score = int((completed_routines / total_routines) * 100) if total_routines else 0
+    completion_rate = get_completion_rate(week_s["completed"], week_s["total"])
+    productivity_score = int(completion_rate * 100)
 
-    # Build weekly overview for N weeks (current + past weeks)
-    start_of_current_week = date.today() - timedelta(days=date.today().weekday())
-    start_date = start_of_current_week - timedelta(weeks=weeks - 1)
-    end_date = start_of_current_week + timedelta(days=6)
-    total_days = (end_date - start_date).days + 1
+    # ── Weekly overview (N weeks window, current week + N-1 prior weeks) ─────
+    week_start = week_s["week_start"]
+    window_start = week_start - timedelta(weeks=weeks - 1)
+    window_end = week_s["week_end"]
+    total_days = (window_end - window_start).days + 1
 
-    weekly_rows = (
+    # Fetch total per day
+    total_rows = (
         db.query(models.Routine.date, func.count(models.Routine.id))
         .filter(
             models.Routine.user_id == user_id,
             models.Routine.is_internal == False,
-            models.Routine.date >= start_date,
-            models.Routine.date <= end_date,
+            models.Routine.date >= window_start,
+            models.Routine.date <= window_end,
         )
         .group_by(models.Routine.date)
-        .order_by(models.Routine.date.asc())
+        .all()
+    )
+    # Fetch completed per day
+    completed_rows = (
+        db.query(models.Routine.date, func.count(models.Routine.id))
+        .filter(
+            models.Routine.user_id == user_id,
+            models.Routine.is_internal == False,
+            models.Routine.status == "Completed",
+            models.Routine.date >= window_start,
+            models.Routine.date <= window_end,
+        )
+        .group_by(models.Routine.date)
         .all()
     )
 
-    weekly_map = {routine_date.isoformat(): count for routine_date, count in weekly_rows}
+    total_map = {d.isoformat(): cnt for d, cnt in total_rows}
+    completed_map = {d.isoformat(): cnt for d, cnt in completed_rows}
+
     weekly_overview = []
     for i in range(total_days):
-        current_date = start_date + timedelta(days=i)
+        day = window_start + timedelta(days=i)
+        day_str = day.isoformat()
+        day_total = total_map.get(day_str, 0)
+        day_completed = completed_map.get(day_str, 0)
         weekly_overview.append({
-            "date": current_date.isoformat(),
-            "count": weekly_map.get(current_date.isoformat(), 0)
+            "date": day_str,
+            "count": day_total,          # kept for backward compat
+            "total": day_total,
+            "completed": day_completed,
         })
 
     return schemas.DashboardStats(
-        total_routines=total_routines,
-        completed_routines=completed_routines,
-        pending_routines=pending_routines,
-        today_routines=today_routines,
+        # Today-scoped
+        today_total=today_s["total"],
+        today_completed=today_s["completed"],
+        today_pending=today_s["pending"],
+        # Week-scoped
+        week_total=week_s["total"],
+        week_completed=week_s["completed"],
+        week_pending=week_s["pending"],
+        # Computed
         productivity_score=productivity_score,
+        completion_rate=completion_rate,
+        # Legacy aliases (backward compat)
+        total_routines=week_s["total"],
+        completed_routines=week_s["completed"],
+        pending_routines=week_s["pending"],
+        today_routines=today_s["total"],
         weekly_overview=weekly_overview,
     )
 
@@ -687,6 +1070,49 @@ def get_workspace_task_by_id(db: Session, task_id: int, user_id: str):
     )
 
 
+def check_workspace_task_edit_permission(db: Session, db_task: models.WorkspaceTask, current_user: models.User) -> bool:
+    """Validate if the current_user is allowed to edit or delete db_task according to workspace permission_mode."""
+    if db_task.user_id == str(current_user.id):
+        return True
+
+    task_owner = db.query(models.User).filter(models.User.id == db_task.user_id).first()
+    if not task_owner:
+        return False
+
+    settings = get_workspace_settings_record(db, task_owner)
+    permission_mode = settings.permission_mode if settings else "members_edit"
+
+    if permission_mode in ["owner_only", "read_only"]:
+        return False
+
+    invite = db.query(models.WorkspaceInvite).filter(
+        models.WorkspaceInvite.inviter_user_id == task_owner.id,
+        models.WorkspaceInvite.invitee_email == current_user.email,
+        models.WorkspaceInvite.status == "Accepted"
+    ).first()
+
+    if not invite:
+        # Check reverse: did the current_user invite the task_owner?
+        invite_reverse = db.query(models.WorkspaceInvite).filter(
+            models.WorkspaceInvite.inviter_user_id == str(current_user.id),
+            models.WorkspaceInvite.invitee_email == task_owner.email,
+            models.WorkspaceInvite.status == "Accepted"
+        ).first()
+        if invite_reverse:
+            return True
+        return False
+
+    role = (invite.role or "member").lower()
+    if role == "viewer":
+        return False
+    if permission_mode == "admins_edit" and role != "admin":
+        return False
+    if permission_mode == "members_edit" and role in ["admin", "member"]:
+        return True
+
+    return False
+
+
 def update_workspace_task(db: Session, db_task: models.WorkspaceTask, payload: schemas.WorkspaceTaskUpdate):
     update_data = payload.model_dump(exclude_unset=True)
     if update_data.get("project_name"):
@@ -814,3 +1240,44 @@ def get_workspace_reports(
         productivity_percentage=productivity_percentage,
         member_performance=member_performance,
     )
+
+# ─── Behavioral Memory ────────────────────────────────────────────────────────
+
+def get_user_behavioral_memory(db: Session, user_id: str) -> list[str]:
+    memories = db.query(models.OrbitBehavioralMemory).filter(models.OrbitBehavioralMemory.user_id == user_id).all()
+    if not memories:
+        return []
+    
+    formatted_memories = []
+    for mem in memories:
+        # e.g., "Deep Work Preference: Prefers mornings"
+        formatted_memories.append(f"{mem.pattern_type}: {mem.pattern_data}")
+    return formatted_memories
+
+def update_user_behavioral_memory(db: Session, user_id: str, insights: list[str]):
+    for insight in insights:
+        if ":" in insight:
+            pattern_type, pattern_data = insight.split(":", 1)
+            pattern_type = pattern_type.strip()
+            pattern_data = pattern_data.strip()
+        else:
+            pattern_type = "General Preference"
+            pattern_data = insight.strip()
+
+        existing = db.query(models.OrbitBehavioralMemory).filter(
+            models.OrbitBehavioralMemory.user_id == user_id,
+            models.OrbitBehavioralMemory.pattern_type == pattern_type
+        ).first()
+
+        if existing:
+            existing.pattern_data = pattern_data
+            existing.updated_at = datetime.now(timezone.utc)
+        else:
+            new_mem = models.OrbitBehavioralMemory(
+                user_id=user_id,
+                pattern_type=pattern_type,
+                pattern_data=pattern_data,
+                updated_at=datetime.now(timezone.utc)
+            )
+            db.add(new_mem)
+    db.commit()

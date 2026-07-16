@@ -5,6 +5,12 @@ import { supabase } from './supabase';
 // When running on a physical device via Expo Go, use your machine's local IP.
 // On emulators/simulators, localhost works (Android uses 10.0.2.2).
 const getApiBaseUrl = (): string => {
+  // If a production or explicit API URL is set via environment variable, use it securely.
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+  
+  // Fallback for local development via Expo Go
   const debuggerHost = Constants.expoConfig?.hostUri;
   if (debuggerHost) {
     const host = debuggerHost.split(':')[0];
@@ -16,7 +22,7 @@ const getApiBaseUrl = (): string => {
 export const API_BASE_URL = getApiBaseUrl();
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: any;
   headers?: Record<string, string>;
 };
@@ -78,7 +84,7 @@ class ApiClient {
     }
 
     const text = await response.text();
-    return text ? JSON.parse(text) : null;
+    return text ? JSON.parse(text) : (null as any);
   }
 
   get<T = any>(path: string) {
@@ -95,6 +101,10 @@ class ApiClient {
 
   delete<T = any>(path: string) {
     return this.request<T>(path, { method: 'DELETE' });
+  }
+
+  patch<T = any>(path: string, body?: any) {
+    return this.request<T>(path, { method: 'PATCH', body });
   }
 }
 

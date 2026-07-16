@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import Base, engine
-from .routes import auth_routes, dashboard_routes, project_routes, routine_routes, workspace_routes
+from .routes import auth_routes, dashboard_routes, orbit_routes, project_routes, routine_routes, workspace_routes
 
 Base.metadata.create_all(bind=engine)
 
@@ -52,6 +52,7 @@ app.include_router(routine_routes.router)
 app.include_router(dashboard_routes.router)
 app.include_router(project_routes.router)
 app.include_router(workspace_routes.router)
+app.include_router(orbit_routes.router)
 
 
 @app.get("/")

@@ -4,6 +4,16 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, Alert } from 'react-native';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
+import * as Notifications from 'expo-notifications';
+import { requestNotificationPermissions } from '../lib/notifications';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 function useProtectedRoute(isAuthenticated: boolean | null, hasCompletedOnboarding: boolean | null) {
   const segments = useSegments();
@@ -38,6 +48,10 @@ function RootLayoutContent() {
   const { theme, isDarkMode } = useTheme();
 
   useProtectedRoute(isAuthenticated, hasCompletedOnboarding);
+
+  useEffect(() => {
+    requestNotificationPermissions();
+  }, []);
 
   if (isAuthenticated === null || hasCompletedOnboarding === null) {
     return (

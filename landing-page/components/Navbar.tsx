@@ -38,7 +38,6 @@ export default function Navbar() {
   }, [theme]);
 
   const links = [
-    { label: 'Features', href: '/#features' },
     { label: 'How it works', href: '/#how' },
     { label: 'About Us', href: '/about' },
     { label: 'Pricing', href: '/pricing' },

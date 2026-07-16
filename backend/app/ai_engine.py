@@ -483,19 +483,166 @@ TRAVEL_TIER_BUFFERS = {
 }
 
 
-def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datetime | None = None, personality: str = "Balanced", travel_overrides: dict[int, str] | None = None) -> list[AIPlannedRoutine]:
+def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datetime | None = None, personality: str = "Balanced", travel_overrides: dict[int, str] | None = None, existing_blocks: list[tuple[datetime, datetime]] | None = None, user_memory_context: list[str] | None = None, clarifications: dict[str, str] | None = None) -> tuple[list[AIPlannedRoutine], list[dict], list[str], bool, int, int, list[str]]:
     valid_tasks = [t for t in ai_tasks if t.get("confidence", 1.0) >= 0.5]
     if not valid_tasks:
-        return []
+        return [], [], [], False, 0, 0, []
 
-    planned_routines: list[AIPlannedRoutine] = []
-    
     today_date = start_after.date() if start_after else date.today()
     base_time = start_after if start_after else datetime.combine(today_date, time(8, 0))
-    end_of_day = datetime.combine(today_date, time(23, 59))
-    
+
+    # ── Chronotype (peak energy window) ──────────────────────────────────────
+    peak_preference = None
+    if user_memory_context:
+        mem_str = " ".join(user_memory_context).lower()
+        if "night owl" in mem_str or "evening" in mem_str:
+            peak_preference = "night owl"
+        elif "morning" in mem_str:
+            peak_preference = "morning"
+        elif "afternoon" in mem_str:
+            peak_preference = "afternoon"
+
+    if clarifications and "energy_preference" in clarifications:
+        peak_preference = clarifications["energy_preference"].lower()
+
+    is_night_owl = bool(peak_preference and "night" in peak_preference)
+
+    # ── Reality Validation Defaults ──────────────────────────────────────────
+    SLEEP_START = time(23, 0)   # 11 PM
+    SLEEP_END   = time(7, 0)    # 7 AM
+    EXERCISE_LIMIT = time(22, 0) # 10 PM
+    # Night owls get a later scheduling ceiling (1 AM next day) so deep work can
+    # run late; everyone else stops at 11 PM to protect sleep. Exercise is still
+    # cut off at 10 PM for everyone regardless of chronotype.
+    if is_night_owl:
+        end_of_day = datetime.combine(today_date + timedelta(days=1), time(1, 0))
+    else:
+        end_of_day = datetime.combine(today_date, SLEEP_START)
+
+    if base_time.time() < SLEEP_END:
+        base_time = datetime.combine(today_date, SLEEP_END)
+
+    validation_warnings = []
+    explanation_reasons = []
+
+    # ── Stage 1: Deadline Prioritization Engine ──────────────────────────────
+    fixed_tasks = []
+    flexible_tasks = []
+
+    for t in valid_tasks:
+        if t.get("is_fixed_time", False):
+            fixed_tasks.append(t)
+        else:
+            urgency = t.get("urgency_score", 5)
+            importance = t.get("importance_score", 5)
+            deadline = t.get("deadline_score", 3)
+            priority_score = urgency + importance + deadline
+            t["_priority_score"] = priority_score
+            flexible_tasks.append(t)
+
+    # Hybrid Sort: priority_tier (macro deadlines) → context_group (minimize context switching) → energy (schedule high-load tasks first)
+    # Bin priority into tiers of 5 so critical deadlines still float to the top,
+    # but tasks within the same tier are clustered by context_group to reduce cognitive switching.
+    CONTEXT_GROUP_ORDER = {
+        "Technical": 0, "Development": 0, "Engineering": 0,
+        "Health": 1, "Fitness": 1,
+        "Admin": 2, "Administrative": 2,
+        "Personal": 3,
+        "Entertainment": 4,
+        "General": 5,
+    }
+
+    def _context_rank(task: dict) -> int:
+        group = str(task.get("context_group", "General")).strip()
+        for key, rank in CONTEXT_GROUP_ORDER.items():
+            if key.lower() in group.lower():
+                return rank
+        return 5  # Unknown groups go last
+
+    flexible_tasks.sort(
+        key=lambda x: (
+            -(x.get("_priority_score", 0) // 5),  # Tier bucket descending (higher priority = lower tier number)
+            _context_rank(x),                       # Context group ascending (Technical first)
+            -(x.get("energy_score", 5)),             # Energy descending (high energy work first in group)
+        )
+    )
+
+    if flexible_tasks:
+        top_task = flexible_tasks[0].get("title", "Task")
+        explanation_reasons.append(f"Prioritized {top_task} based on deadline proximity and importance.")
+
+    # Build context grouping explanation
+    context_groups_used: list[str] = []
+    for t in flexible_tasks:
+        g = str(t.get("context_group", "General"))
+        if g not in context_groups_used:
+            context_groups_used.append(g)
+    if len(context_groups_used) > 1:
+        explanation_reasons.append(f"Grouped tasks by context to minimize mental context switching: {', '.join(context_groups_used)}.")
+
+    # ── Stage 2: Reality Validation Engine ───────────────────────────────────
+    # Workload Protection
+    total_task_minutes = sum(t.get("estimated_duration", 60) for t in valid_tasks if not t.get("is_internal_logistic"))
+    available_minutes = int((end_of_day - base_time).total_seconds() / 60)
+    # Subtract time already booked today (within the remaining window) so the
+    # overload check reflects the space that's actually free.
+    if existing_blocks:
+        for b_start, b_end in existing_blocks:
+            overlap_start = max(b_start, base_time)
+            overlap_end = min(b_end, end_of_day)
+            if overlap_end > overlap_start:
+                available_minutes -= int((overlap_end - overlap_start).total_seconds() / 60)
+        available_minutes = max(0, available_minutes)
+    effective_available = int(available_minutes * 0.80)
+    is_overloaded = total_task_minutes > effective_available
+    if is_overloaded:
+        validation_warnings.append(f"This plan requires approximately {round(total_task_minutes/60, 1)} hours of work. I recommend moving some tasks to tomorrow.")
+
+    # Exercise Protection
+    for t in flexible_tasks:
+        cat = str(t.get("category", "")).lower()
+        title = str(t.get("title", "")).lower()
+        if "gym" in title or "swim" in title or "workout" in title or cat == "health":
+            # Just a flag, actual check relies on scheduling placement or fixed time
+            t["_is_exercise"] = True
+
+    for t in fixed_tasks:
+        title = str(t.get("title", "")).lower()
+        if "gym" in title or "swim" in title or "workout" in title:
+            start_time_str = t.get("time_constraint")
+            if start_time_str:
+                try:
+                    dt_time = datetime.strptime(start_time_str, "%H:%M").time()
+                    if dt_time >= EXERCISE_LIMIT or dt_time < SLEEP_END:
+                        validation_warnings.append(f"{t.get('title')} at {start_time_str} may negatively affect recovery and sleep.")
+                except ValueError:
+                    pass
+
+    # Sleep Protection for Fixed Tasks
+    for t in fixed_tasks:
+        start_time_str = t.get("time_constraint")
+        if start_time_str:
+            try:
+                dt_time = datetime.strptime(start_time_str, "%H:%M").time()
+                energy = str(t.get("energy_requirement", "Medium")).capitalize()
+                if (dt_time >= SLEEP_START or dt_time < SLEEP_END) and energy == "High":
+                    validation_warnings.append(f"High-energy task '{t.get('title')}' is scheduled during sleep hours.")
+            except ValueError:
+                pass
+
+
+    # ── Stage 3: Scheduling & Recovery Injection Engine ──────────────────────
+    planned_routines: list[dict] = []
     occupied_slots: list[tuple[datetime, datetime]] = []
-    
+
+    # Seed the day with the user's already-scheduled blocks so newly planned
+    # tasks slot into real gaps instead of overlapping what's already booked.
+    if existing_blocks:
+        for b_start, b_end in existing_blocks:
+            if b_end > b_start:
+                occupied_slots.append((b_start, b_end))
+        occupied_slots.sort(key=lambda s: s[0])
+
     def add_slot(start: datetime, duration_mins: int) -> tuple[datetime, datetime]:
         end = start + timedelta(minutes=duration_mins)
         occupied_slots.append((start, end))
@@ -506,39 +653,113 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
         end = start + timedelta(minutes=duration_mins)
         if end > end_of_day:
             return False
+        if start.time() < SLEEP_END and start.date() == today_date:
+            return False
         for s_start, s_end in occupied_slots:
             if start < s_end and end > s_start:
                 return False
         return True
 
-    def find_free_slot(search_start: datetime, duration_mins: int, energy_req: str = "Medium", requires_business_hours: bool = False) -> datetime | None:
-        candidate = search_start
-        step = timedelta(minutes=15)
-        remainder = candidate.minute % 15
-        if remainder != 0:
-            candidate += timedelta(minutes=(15 - remainder))
-            
-        while candidate + timedelta(minutes=duration_mins) <= end_of_day:
-            if is_slot_free(candidate, duration_mins):
-                # Reality Validation: Business hours constraint (10 AM to 9 PM in India)
-                if requires_business_hours:
-                    end_time = candidate + timedelta(minutes=duration_mins)
-                    if candidate.time() < time(10, 0) or end_time.time() > time(21, 0):
-                        candidate += step
-                        continue
+    def find_free_slot(search_start: datetime, duration_mins: int, energy_req: str = "Medium", requires_business_hours: bool = False, is_exercise: bool = False, peak_preference: str | None = None) -> datetime | None:
+        windows_to_search = []
+        
+        if energy_req.lower() == "high" and peak_preference:
+            pref = peak_preference.lower()
+            if "night" in pref or "evening" in pref:
+                windows_to_search.append((time(16, 0), time(23, 59)))
+                windows_to_search.append((time(0, 0), time(23, 59)))
+            elif "morning" in pref:
+                windows_to_search.append((time(8, 0), time(12, 0)))
+                windows_to_search.append((time(0, 0), time(23, 59)))
+            elif "afternoon" in pref:
+                windows_to_search.append((time(12, 0), time(17, 0)))
+                windows_to_search.append((time(0, 0), time(23, 59)))
+        
+        if not windows_to_search:
+            windows_to_search.append((time(0, 0), time(23, 59)))
 
-                # Calm personality avoids High energy tasks late at night if possible
-                if energy_req == "High" and personality == "Calm" and candidate.time() >= time(17, 0):
-                    pass # We ideally skip this, but we rely on fallback if no earlier slot exists
-                return candidate
-            candidate += step
+        for window_start, window_end in windows_to_search:
+            candidate = search_start
+            
+            # If candidate is before window_start (and we're on the same day), jump to window_start
+            # We assume candidate.date() is today_date here.
+            if candidate.time() < window_start:
+                candidate = datetime.combine(candidate.date(), window_start)
+                
+            step = timedelta(minutes=15)
+            remainder = candidate.minute % 15
+            if remainder != 0:
+                candidate += timedelta(minutes=(15 - remainder))
+
+            while candidate + timedelta(minutes=duration_mins) <= end_of_day:
+                if candidate.time() > window_end and window_end != time(23, 59):
+                    break # outside window
+                    
+                if is_slot_free(candidate, duration_mins):
+                    end_time_check = candidate + timedelta(minutes=duration_mins)
+                    
+                    # Business hours validation
+                    if requires_business_hours:
+                        if candidate.time() < time(10, 0) or end_time_check.time() > time(21, 0):
+                            candidate += step
+                            continue
+                    
+                    # Exercise limit validation: only allow between wake time and
+                    # the 10 PM cutoff. Rejects late-night (>=22:00) AND post-midnight
+                    # (<07:00) slots, which matters for night owls whose day runs past 1 AM.
+                    if is_exercise:
+                        if candidate.time() >= EXERCISE_LIMIT or candidate.time() < SLEEP_END:
+                            candidate += step
+                            continue
+                    
+                    return candidate
+                candidate += step
         return None
 
-    fixed_tasks = [t for t in valid_tasks if t.get("is_fixed_time", False)]
-    flexible_tasks = [t for t in valid_tasks if not t.get("is_fixed_time", False)]
-    
+    # Deep Work Engine
+    def _fragment_deep_work(task: dict) -> list[dict]:
+        duration = task.get("estimated_duration", 60)
+        energy_score = task.get("energy_score", 5)
+        energy = str(task.get("energy_requirement", "Medium")).capitalize()
+
+        if (energy != "High" and energy_score < 7) or duration <= 90:
+            return [task]
+
+        fragments = []
+        remaining = duration
+        block_num = 1
+        while remaining > 0:
+            block_dur = min(90, remaining)
+            frag = dict(task)
+            frag["title"] = f"{task.get('title', 'Task')} (Block {block_num})"
+            frag["estimated_duration"] = block_dur
+            frag["_is_deep_work_fragment"] = True
+            fragments.append(frag)
+            remaining -= block_dur
+            block_num += 1
+
+        return fragments
+
+    # Consecutive High-Energy Tracking
+    consecutive_high_mins = 0
+    def _needs_consecutive_break() -> bool:
+        return consecutive_high_mins >= 180
+
+    def _update_energy_counter(energy: str, mins: int):
+        nonlocal consecutive_high_mins
+        if energy == "High":
+            consecutive_high_mins += mins
+        else:
+            consecutive_high_mins = 0
+
+    # Process Flexible tasks for fragmentation
+    fragmented_flexible_tasks: list[dict] = []
+    for t in flexible_tasks:
+        fragments = _fragment_deep_work(t)
+        fragmented_flexible_tasks.extend(fragments)
+
     # Layer 1: Fixed Events
-    for ti, t in enumerate(fixed_tasks):
+    for t in fixed_tasks:
         start_time_str = t.get("time_constraint")
         duration = t.get("estimated_duration") or 60
         start_dt = None
@@ -548,97 +769,29 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
                 start_dt = datetime.combine(today_date, dt_time)
             except ValueError:
                 pass
-        
+
         if not start_dt:
-            start_dt = find_free_slot(base_time, duration, "High") or base_time
+            start_dt = find_free_slot(base_time, duration, "High", peak_preference=peak_preference) or base_time
+
+        # Conflict guard: a fixed task landing on an already-occupied slot
+        # (an existing routine or another fixed task) gets bumped to the next
+        # free slot instead of silently overlapping.
+        if not is_slot_free(start_dt, duration):
+            relocated = find_free_slot(start_dt, duration, "High", peak_preference=peak_preference)
+            if relocated and relocated != start_dt:
+                original_label = start_dt.strftime("%H:%M")
+                new_label = relocated.strftime("%H:%M")
+                validation_warnings.append(
+                    f"Moved '{t.get('title', 'a task')}' from {original_label} to {new_label} to avoid a conflict with another task."
+                )
+                start_dt = relocated
 
         s, e = add_slot(start_dt, duration)
-        
+
+        # Commute buffer
         if t.get("requires_travel"):
-            # Determine commute buffer from clarifications or task's travel_tier
-            task_idx = valid_tasks.index(t)
-            travel_key = f"travel_{task_idx}"
-            if travel_overrides and travel_key in travel_overrides:
-                travel_tier = travel_overrides[travel_key]
-            else:
-                travel_tier = t.get("travel_tier", "moderate")
-            commute_mins = TRAVEL_TIER_BUFFERS.get(travel_tier, 30)
-
-            buffer_start = max(base_time, s - timedelta(minutes=commute_mins))
-            if buffer_start < s:
-                add_slot(buffer_start, int((s - buffer_start).total_seconds() // 60))
-                planned_routines.append({
-                    "task": {
-                        "title": f"Commute to {t.get('title', 'Event')}",
-                        "priority": "Medium",
-                        "energy_requirement": "Low",
-                        "is_fixed_time": False,
-                        "is_internal_logistic": True
-                    },
-                    "start": buffer_start,
-                    "end": s
-                })
-            if e + timedelta(minutes=commute_mins) <= end_of_day:
-                add_slot(e, commute_mins)
-                planned_routines.append({
-                    "task": {
-                        "title": "Return Commute",
-                        "priority": "Medium",
-                        "energy_requirement": "Low",
-                        "is_fixed_time": False,
-                        "is_internal_logistic": True
-                    },
-                    "start": e,
-                    "end": e + timedelta(minutes=commute_mins)
-                })
-
-        planned_routines.append({"task": t, "start": s, "end": e})
-
-    # Layer 2: Flexible & Focus Tasks (Grouped by Context & Paced)
-    def flex_sort_key(t):
-        energy = str(t.get("energy_requirement", "Medium")).capitalize()
-        e_score = 0 if energy == "High" else 1 if energy == "Medium" else 2
-        ctx = str(t.get("context_group", "Other"))
-        return (ctx, e_score)
-
-    flexible_tasks.sort(key=flex_sort_key)
-    
-    current_search = base_time
-    
-    break_duration = 15
-    if personality == "Aggressive":
-        break_duration = 0
-    elif personality == "Calm":
-        break_duration = 30
-        
-    for i, t in enumerate(flexible_tasks):
-        duration = t.get("estimated_duration") or 60
-        energy = str(t.get("energy_requirement", "Medium")).capitalize()
-        req_business = bool(t.get("requires_business_hours", False))
-        
-        slot = find_free_slot(current_search, duration, energy, requires_business_hours=req_business)
-        
-        if not slot:
-            shrinked_duration = max(30, duration // 2)
-            slot = find_free_slot(current_search, shrinked_duration, energy, requires_business_hours=req_business)
-            if slot:
-                duration = shrinked_duration
-            else:
-                # If still no slot (even after shrinking), fallback without business hour constraint if needed
-                slot = find_free_slot(current_search, shrinked_duration, energy, requires_business_hours=False)
-                if not slot:
-                    slot = occupied_slots[-1][1] if occupied_slots else current_search
-        
-        s, e = add_slot(slot, duration)
-
-        # Inject commute buffers for flexible tasks that require travel
-        if t.get("requires_travel"):
-            task_idx = valid_tasks.index(t)
-            travel_key = f"travel_{task_idx}"
-            if travel_overrides and travel_key in travel_overrides:
-                travel_tier = travel_overrides[travel_key]
-            else:
-                travel_tier = t.get("travel_tier", "moderate")
+            task_idx = valid_tasks.index(t) if t in valid_tasks else -1
+            travel_tier = travel_overrides.get(task_idx, t.get("travel_tier", "moderate")) if travel_overrides else t.get("travel_tier", "moderate")
             commute_mins = TRAVEL_TIER_BUFFERS.get(travel_tier, 30)
 
             buffer_start = max(base_time, s - timedelta(minutes=commute_mins))
@@ -650,11 +803,14 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
                         "priority": "Medium",
                         "energy_requirement": "Low",
                         "is_fixed_time": False,
-                        "is_internal_logistic": True
+                        "is_internal_logistic": True,
+                        "category": "Commute",
+                        "energy_score": 2,
                     },
                     "start": buffer_start,
                     "end": s
                 })
+
             if e + timedelta(minutes=commute_mins) <= end_of_day and is_slot_free(e, commute_mins):
                 rc_s, rc_e = add_slot(e, commute_mins)
                 planned_routines.append({
@@ -663,53 +819,156 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
                         "priority": "Medium",
                         "energy_requirement": "Low",
                         "is_fixed_time": False,
-                        "is_internal_logistic": True
+                        "is_internal_logistic": True,
+                        "category": "Commute",
+                        "energy_score": 2,
                     },
                     "start": rc_s,
                     "end": rc_e
                 })
 
         planned_routines.append({"task": t, "start": s, "end": e})
-        
-        # Inject Recovery Buffer
-        if (t.get("requires_focus") or energy == "High") and break_duration > 0:
+
+    # Layer 2: Flexible Tasks
+    current_search = base_time
+    break_duration = 15 if personality != "Aggressive" else 0
+
+    for i, t in enumerate(fragmented_flexible_tasks):
+        duration = t.get("estimated_duration") or 60
+        energy = str(t.get("energy_requirement", "Medium")).capitalize()
+        req_business = bool(t.get("requires_business_hours", False))
+        is_exercise = bool(t.get("_is_exercise", False))
+
+        # Check consecutive high-energy
+        if _needs_consecutive_break():
+            recovery_dur = 30
+            recovery_slot = find_free_slot(current_search, recovery_dur, peak_preference=peak_preference)
+            if recovery_slot:
+                rs, re = add_slot(recovery_slot, recovery_dur)
+                planned_routines.append({
+                    "task": {
+                        "title": "Walk / Stretch Break",
+                        "priority": "Low",
+                        "energy_requirement": "Low",
+                        "is_internal_logistic": True,
+                        "category": "Recovery",
+                        "energy_score": 1,
+                        "scheduling_reason": "Injected to prevent mental exhaustion after 3 hours of focus.",
+                    },
+                    "start": rs,
+                    "end": re
+                })
+                current_search = re
+                consecutive_high_mins = 0
+                explanation_reasons.append("Inserted recovery periods between high-focus tasks to reduce cognitive fatigue.")
+
+        slot = find_free_slot(current_search, duration, energy, req_business, is_exercise, peak_preference=peak_preference)
+
+        if not slot:
+            shrinked_duration = max(30, duration // 2)
+            slot = find_free_slot(current_search, shrinked_duration, energy, req_business, is_exercise, peak_preference=peak_preference)
+            if slot:
+                duration = shrinked_duration
+            else:
+                slot = occupied_slots[-1][1] if occupied_slots else current_search
+
+        s, e = add_slot(slot, duration)
+        _update_energy_counter(energy, duration)
+
+        # Travel Buffer
+        if t.get("requires_travel"):
+            task_idx = valid_tasks.index(t) if t in valid_tasks else -1
+            travel_tier = travel_overrides.get(task_idx, t.get("travel_tier", "moderate")) if travel_overrides else t.get("travel_tier", "moderate")
+            commute_mins = TRAVEL_TIER_BUFFERS.get(travel_tier, 30)
+
+            buffer_start = max(base_time, s - timedelta(minutes=commute_mins))
+            if buffer_start < s and is_slot_free(buffer_start, int((s - buffer_start).total_seconds() // 60)):
+                add_slot(buffer_start, int((s - buffer_start).total_seconds() // 60))
+                planned_routines.append({
+                    "task": {"title": f"Commute to {t.get('title')}", "is_internal_logistic": True, "category": "Commute"},
+                    "start": buffer_start, "end": s
+                })
+            
+            if e + timedelta(minutes=commute_mins) <= end_of_day and is_slot_free(e, commute_mins):
+                rc_s, rc_e = add_slot(e, commute_mins)
+                planned_routines.append({
+                    "task": {"title": "Return Commute", "is_internal_logistic": True, "category": "Commute"},
+                    "start": rc_s, "end": rc_e
+                })
+
+        planned_routines.append({"task": t, "start": s, "end": e})
+
+        # Deep work fragment recovery
+        if t.get("_is_deep_work_fragment") and break_duration > 0:
             if is_slot_free(e, break_duration):
                 bs, be = add_slot(e, break_duration)
                 planned_routines.append({
                     "task": {
-                        "title": "Recovery Break",
-                        "priority": "Low",
-                        "energy_requirement": "Low",
-                        "is_fixed_time": False,
-                        "is_internal_logistic": True
+                        "title": "Recovery Buffer",
+                        "is_internal_logistic": True,
+                        "category": "Recovery",
+                        "energy_score": 1,
+                        "scheduling_reason": "Recovery buffer after a 90m deep work block."
                     },
-                    "start": bs,
-                    "end": be
+                    "start": bs, "end": be
                 })
-        
-        # Add transition padding between different context groups to avoid jarring context switching
-        next_t = flexible_tasks[i+1] if i + 1 < len(flexible_tasks) else None
-        if next_t and next_t.get("context_group") != t.get("context_group"):
-            padding = 15 if personality != "Aggressive" else 0
-            current_search = e + timedelta(minutes=break_duration + padding)
-        else:
-            current_search = e + timedelta(minutes=break_duration)
+                explanation_reasons.append("Fragmented tasks > 90m and injected 15m recovery buffers.")
 
+        current_search = e + timedelta(minutes=break_duration)
+
+    # ── Meal Injection ───────────────────────────────────────────────────────
+    meal_slots = [
+        ("Lunch Break", time(12, 30), 45, "Health"),
+        ("Dinner Break", time(19, 30), 45, "Health"),
+    ]
+    for meal_title, meal_time, meal_dur, meal_cat in meal_slots:
+        meal_dt = datetime.combine(today_date, meal_time)
+        if meal_dt >= base_time and is_slot_free(meal_dt, meal_dur):
+            ms, me = add_slot(meal_dt, meal_dur)
+            planned_routines.append({
+                "task": {
+                    "title": meal_title,
+                    "is_internal_logistic": True,
+                    "category": meal_cat,
+                    "scheduling_reason": f"{meal_title} injected automatically to maintain energy levels.",
+                },
+                "start": ms, "end": me
+            })
+            explanation_reasons.append(f"Injected {meal_title} to ensure sustained energy.")
+
+    # Sort
     planned_routines.sort(key=lambda r: r["start"])
-    
-    results = []
+
+    # ── Overlap self-check ────────────────────────────────────────────────────
+    # Safety net: verify no two scheduled blocks overlap before we report the
+    # plan as ready. If any do, surface it as a warning rather than silently
+    # claiming success.
+    for prev, curr in zip(planned_routines, planned_routines[1:]):
+        if curr["start"] < prev["end"]:
+            validation_warnings.append(
+                f"Heads up: '{_clean_planner_title(curr['task'].get('title', 'a task'))}' overlaps "
+                f"'{_clean_planner_title(prev['task'].get('title', 'a task'))}'. You may want to adjust the timing."
+            )
+            break
+
+    # ── Map to AIPlannedRoutine ──────────────────────────────────────────────
+    results: list[AIPlannedRoutine] = []
     for r in planned_routines:
         t_data = r["task"]
         title = _clean_planner_title(t_data.get("title", ""))
-        priority = "Medium"
-        focus_mode_recommended = bool(t_data.get("focus_mode_recommended", False))
-            
-        desc = f"AI planned: {title}"
-        if title == "Recovery Break":
-            desc = "Mental recovery and pacing break to sustain cognitive energy."
-        elif "Commute" in title:
-            desc = "Automatically generated travel buffer time."
-            
+        desc = "AI planned: " + title
+        if "Recovery" in title or "Commute" in title or "Break" in title:
+            desc = "Internal logistics block."
+
+        # Compute V2 cognitive scores explicitly for the fallback routines
+        energy_score = t_data.get("energy_score", 5)
+        complexity_score = t_data.get("complexity_score", 5)
+        urgency_score = t_data.get("urgency_score", 5)
+        importance_score = t_data.get("importance_score", 5)
+        deadline_score = t_data.get("deadline_score", 3)
+        category = t_data.get("category") or t_data.get("context_group") or "General"
+        scheduling_reason = t_data.get("scheduling_reason")
+
         results.append(
             AIPlannedRoutine(
                 title=title,
@@ -717,17 +976,29 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
                 date=today_date,
                 start_time=r["start"].time().replace(second=0, microsecond=0),
                 end_time=r["end"].time().replace(second=0, microsecond=0),
-                priority=priority,
+                priority="Medium",
                 status="Pending",
                 estimated_time=int((r["end"] - r["start"]).total_seconds() // 60),
-                focus_mode_recommended=focus_mode_recommended,
+                focus_mode_recommended=bool(t_data.get("focus_mode_recommended", False)),
                 is_internal=bool(t_data.get("is_internal_logistic", False)),
-                suggestion=_suggestion_for(title, priority),
+                suggestion=_suggestion_for(title, "Medium"),
+                energy_score=energy_score,
+                complexity_score=complexity_score,
+                urgency_score=urgency_score,
+                location=t_data.get("location"),
+                category=category,
+                scheduling_reason=scheduling_reason,
+                fixed_time=bool(t_data.get("is_fixed_time", False)),
             )
         )
-    return results, flexible_tasks
 
-def generate_heuristic_plan(input_text: str, plan_scope: str, start_after: datetime | None = None) -> AIGenerationResponse:
+    # Deduplicate explanation reasons and cap at 3
+    explanation_points = list(dict.fromkeys(explanation_reasons))[:3]
+    return results, flexible_tasks, explanation_points, is_overloaded, total_task_minutes, available_minutes, validation_warnings
+
+
+
+def generate_heuristic_plan(input_text: str, plan_scope: str, start_after: datetime | None = None, existing_blocks: list[tuple[datetime, datetime]] | None = None) -> AIGenerationResponse:
     tasks = _extract_tasks(input_text)
     ai_tasks = [
         {
@@ -742,11 +1013,15 @@ def generate_heuristic_plan(input_text: str, plan_scope: str, start_after: datet
         } 
         for t in tasks
     ]
-    planned_routines, _ = _optimize_schedule(ai_tasks, plan_scope, start_after, "Balanced")
+    planned_routines, _, explanation_pts, is_over, total_mins, avail_mins, val_warns = _optimize_schedule(ai_tasks, plan_scope, start_after, "Balanced", existing_blocks=existing_blocks)
     return AIGenerationResponse(
         summary=f"Built a simple {plan_scope} routine.",
         productivity_tips=["Fallback scheduling used."],
         routines=planned_routines,
+        explanation_points=explanation_pts,
+        is_overloaded=is_over,
+        overload_message=f"This plan requires {total_mins} minutes but only {avail_mins} are available." if is_over else None,
+        validation_warnings=val_warns,
     )
 
 
@@ -781,6 +1056,9 @@ Output STRICT JSON matching this schema:
       "ideal_time_of_day": "morning|afternoon|evening|night|any",
       "energy_requirement": "High|Medium|Low",
       "cognitive_load": "high|medium|low",
+      "urgency_score": 1-10,
+      "importance_score": 1-10,
+      "deadline_score": 1-10,
       "context_group": "Development",
       "focus_mode_recommended": true/false,
       "is_internal_logistic": true/false,
@@ -820,20 +1098,20 @@ Rules:
     )
 
 
-def _build_clarification_questions(parsed: dict, max_questions: int = 2) -> list[AIClarificationQuestion]:
+def _build_clarification_questions(parsed: dict, max_questions: int = 2, user_memory_context: list[str] | None = None) -> list[AIClarificationQuestion]:
     """Build lightweight clarification questions based on AI analysis results. Max 2 questions."""
     questions: list[AIClarificationQuestion] = []
     tasks = parsed.get("tasks", [])
 
-    # 1. Travel clarification — ask for tasks that require travel to verify distance
+    # 1. Travel clarification — ONLY ask if it's long travel or unknown. Nearby/Moderate get smart defaults.
     for i, task in enumerate(tasks):
         if len(questions) >= max_questions:
             break
-        if task.get("requires_travel"):
+        if task.get("requires_travel") and task.get("travel_tier") in ("unknown", "long_travel"):
             title = task.get("title", "this activity")
             questions.append(AIClarificationQuestion(
                 id=f"travel_{i}",
-                question=f"How far is the {title.lower()}?",
+                question=f"How far is {title.lower()}?",
                 type="single_choice",
                 options=[
                     AIClarificationOption(value="nearby", label="Nearby", emoji="🏠"),
@@ -844,48 +1122,16 @@ def _build_clarification_questions(parsed: dict, max_questions: int = 2) -> list
                 default_value="moderate",
             ))
 
-    # 2. Personality suggestion — ask if schedule has multiple tasks
-    if len(questions) < max_questions:
-        density = parsed.get("schedule_density", "moderate")
-        personality = parsed.get("inferred_personality", "Balanced")
-        personality_conf = parsed.get("personality_confidence", 0.9)
-
-        if density in ("packed", "moderate"):
-            questions.append(AIClarificationQuestion(
-                id="personality",
-                question="How would you like to pace your schedule today?",
-                type="single_choice",
-                options=[
-                    AIClarificationOption(value="Balanced", label="Keep Balanced", emoji="⚖️"),
-                    AIClarificationOption(value="Aggressive", label="Tighter Schedule", emoji="⚡"),
-                    AIClarificationOption(value="Calm", label="Relaxed Pacing", emoji="🧘"),
-                ],
-                task_title=None,
-                default_value="Balanced",
-            ))
-        elif personality_conf < 0.7 and personality != "Balanced":
-            questions.append(AIClarificationQuestion(
-                id="personality",
-                question=f"You seem to prefer a {personality.lower()} pace. Keep it?",
-                type="single_choice",
-                options=[
-                    AIClarificationOption(value="Balanced", label="Keep Balanced", emoji="⚖️"),
-                    AIClarificationOption(value=personality, label=f"Use {personality}", emoji="✦"),
-                ],
-                task_title=None,
-                default_value="Balanced",
-            ))
-
-    # 3. Duration clarification for tasks where AI is somewhat uncertain
+    # 2. Duration clarification — ONLY if confidence is very low and no good default exists
     for i, task in enumerate(tasks):
         if len(questions) >= max_questions:
             break
-        if task.get("duration_confidence") == "low" or task.get("confidence", 1.0) < 0.85:
+        if task.get("duration_confidence") == "low" and task.get("confidence", 1.0) < 0.7:
             title = task.get("title", "this task")
             est = task.get("estimated_duration", 60)
             questions.append(AIClarificationQuestion(
                 id=f"duration_{i}",
-                question=f"How long is {title.lower()}?",
+                question=f"Roughly how long will {title.lower()} take?",
                 type="single_choice",
                 options=[
                     AIClarificationOption(value=str(max(30, est // 2)), label=f"~{max(30, est // 2)} min", emoji="⏱️"),
@@ -896,34 +1142,16 @@ def _build_clarification_questions(parsed: dict, max_questions: int = 2) -> list
                 default_value=str(est),
             ))
 
-    # 4. Business hours clarification
-    for i, task in enumerate(tasks):
-        if len(questions) >= max_questions:
-            break
-        if task.get("requires_business_hours") and not task.get("is_fixed_time") and not task.get("time_constraint"):
-            title = task.get("title", "this task")
-            questions.append(AIClarificationQuestion(
-                id=f"biz_hours_{i}",
-                question=f"Should {title.lower()} be done during business hours?",
-                type="single_choice",
-                options=[
-                    AIClarificationOption(value="yes", label="Yes (10AM-9PM)", emoji="🏪"),
-                    AIClarificationOption(value="no", label="Anytime", emoji="🕰️"),
-                ],
-                task_title=title,
-                default_value="yes",
-            ))
-
-    # 5. Timing Ambiguity
+    # 3. Timing Ambiguity — ONLY if completely unspecified and critical
     for i, task in enumerate(tasks):
         if len(questions) >= max_questions:
             break
         ideal_time = task.get("ideal_time_of_day", "any")
-        if ideal_time == "any" and not task.get("is_fixed_time"):
+        if ideal_time == "any" and not task.get("is_fixed_time") and task.get("energy_requirement") == "High":
             title = task.get("title", "this task")
             questions.append(AIClarificationQuestion(
                 id=f"timing_{i}",
-                question=f"When do you prefer to do {title.lower()}?",
+                question=f"When do you prefer to tackle {title.lower()}?",
                 type="single_choice",
                 options=[
                     AIClarificationOption(value="morning", label="Morning", emoji="🌅"),
@@ -931,13 +1159,266 @@ def _build_clarification_questions(parsed: dict, max_questions: int = 2) -> list
                     AIClarificationOption(value="evening", label="Evening", emoji="🌙"),
                 ],
                 task_title=title,
-                default_value="afternoon",
+                default_value="morning",
             ))
+
+    # 4. Energy Preference - ONLY if not in memory and there's a high energy task
+    has_high_energy = any(str(t.get("energy_requirement", "")).lower() == "high" for t in tasks)
+    has_energy_pref = False
+    if user_memory_context:
+        mem_str = " ".join(user_memory_context).lower()
+        if "night owl" in mem_str or "morning" in mem_str or "peak energy" in mem_str or "afternoon" in mem_str:
+            has_energy_pref = True
+
+    if has_high_energy and not has_energy_pref and len(questions) < max_questions:
+        questions.append(AIClarificationQuestion(
+            id="energy_preference",
+            question="When do you typically have the most energy for deep work?",
+            type="single_choice",
+            options=[
+                AIClarificationOption(value="Morning Person", label="Mornings", emoji="🌅"),
+                AIClarificationOption(value="Afternoon Peak", label="Afternoons", emoji="☕"),
+                AIClarificationOption(value="Night Owl", label="Night Owl", emoji="🦉"),
+            ],
+            task_title=None,
+            default_value="Morning Person",
+        ))
 
     return questions
 
 
-async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | None = None) -> AIAnalysisResponse:
+async def classify_intent_with_groq(input_text: str) -> str:
+    """Classifies the user intent quickly."""
+    system_prompt = """You are an Intent Classifier for an AI Planning Assistant.
+Categorize the user's input into EXACTLY ONE of these categories. Return ONLY the category name as a string in JSON.
+
+Categories:
+1. "Greeting" - E.g. "Hello", "Hi", "Good morning"
+2. "Small Talk" - E.g. "How are you?", "What's up?"
+3. "Unrelated Question" - E.g. "Who won IPL?", "What's the weather?", "Tell me a joke"
+4. "Vague Request" - E.g. "I want to be productive today", "Help me work"
+5. "Planning Request" - E.g. "Study SQL for 2 hours", "Gym at 6 PM", "Build a schedule"
+
+Output format MUST be strictly:
+{"intent": "Category Name"}
+"""
+    result = await _groq_chat_json_async(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": input_text},
+        ],
+        temperature=0.1,
+    )
+    if not result:
+        return "Planning Request" # fallback
+    return result.get("intent", "Planning Request")
+
+
+async def classify_orbit_intent(message: str, session_context: dict | None) -> str:
+    """
+    Context-aware intent classifier. Uses the active session context (pending
+    question, current state) to correctly interpret short replies like "yes",
+    "4 hours", "no", "nearby", "tomorrow".
+
+    Returns one of:
+      greeting | small_talk | unrelated | planning_request |
+      clarification_response | schedule_edit
+    """
+    pending_key = (session_context or {}).get("pending_question_key")
+    pending_q   = (session_context or {}).get("pending_question")
+    has_schedule = bool((session_context or {}).get("generated_routines"))
+
+    context_block = ""
+    if pending_q:
+        context_block = f"\nThe assistant just asked: \"{pending_q}\"\nThe expected answer type: {pending_key or 'general'}"
+    if has_schedule:
+        context_block += "\nA schedule has already been generated."
+
+    system_prompt = f"""You are an Intent Classifier for an AI Planning Assistant.
+Given the conversation context below, classify the user message into EXACTLY ONE intent.
+
+Context:{context_block}
+
+Intent categories:
+1. "greeting"              - "hello", "hi", "good morning"
+2. "small_talk"            - "how are you", "what's up"
+3. "unrelated"             - strictly off-topic questions (e.g. "who won IPL?", "what is the weather?")
+4. "planning_request"      - new planning goal with tasks, goals, or schedule request
+5. "clarification_response"- a direct answer to the assistant's last question. This includes literal answers ("4 hours", "yes") AND conversational answers deferring to the AI ("you decide", "schedule it around my events", "figure it out").
+6. "schedule_edit"         - editing/modifying an EXISTING generated schedule: "move X to 9pm", "add lunch"
+
+Rules:
+- If there is a pending question AND the message is a plausible answer (even an informal one like "you pick" or "schedule it"), classify as "clarification_response".
+- Single words like "yes", "no", "sure", "okay" in context of a pending question = "clarification_response".
+- If a schedule exists and the message asks to modify it = "schedule_edit".
+- If a schedule exists and the message reports a PROBLEM, complaint, or question about it (e.g. "tasks overlap", "these clash", "this is wrong", "have you checked?", "fix the timing") = "schedule_edit". Treat it as a request to correct the schedule.
+- Pure greetings or truly off-topic queries = "greeting" / "small_talk" / "unrelated". Do NOT classify informal answers as unrelated.
+
+Return ONLY JSON in this exact format: {{"intent": "one_of_the_above"}}
+"""
+    result = await _groq_chat_json_async(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message},
+        ],
+        temperature=0.05,
+    )
+    if not result:
+        # If there's a pending question, assume it's a clarification answer
+        return "clarification_response" if pending_key else "planning_request"
+    return result.get("intent", "planning_request")
+
+
+async def extract_planning_context(message: str, existing_context: dict) -> dict:
+    """
+    Extracts structured planning fields from the user's message and merges
+    them with the existing context. Returns the updated context dict.
+
+    Fields it fills in: goal, tasks, duration, fixed_events, constraints.
+    """
+    current_tasks   = existing_context.get("tasks", [])
+    current_goal    = existing_context.get("goal")
+    pending_key     = existing_context.get("pending_question_key")
+
+    system_prompt = f"""You are a planning context extractor.
+Extract planning information from the user message and merge it with what we already know.
+
+Current known context:
+- goal: {current_goal or "unknown"}
+- tasks: {current_tasks or []}
+- pending_question_key: {pending_key or "none"}
+
+Extract and return a JSON object with these fields (only include fields that are present in the message):
+{{
+  "goal": "string or null",
+  "tasks": ["list", "of", "tasks"],
+  "duration": "e.g. 2 hours, 90 minutes, auto, or null",
+  "goal_has_duration": boolean,
+  "fixed_events": ["fixed time events like meetings"],
+  "constraints": ["constraints like no early morning, gym at 6pm"],
+  "answer_to_pending": "direct answer to the pending question if present"
+}}
+
+Rules:
+- If the message is a direct answer to {pending_key or "nothing"}, put it in "answer_to_pending"
+- Extract tasks only from this message — do not repeat what is already known
+- If the user explicitly asks you to figure out the duration, fit it around fixed events, or fill the gaps, set "duration" to "auto".
+- Set "goal_has_duration" to true ONLY IF the tasks/events provided have universally obvious intrinsic durations (e.g., "Movie", "Dinner", "Flight", "Gym"). Otherwise false.
+- Return null for fields not mentioned
+"""
+    result = await _groq_chat_json_async(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message},
+        ],
+        temperature=0.1,
+    )
+    if not result:
+        return existing_context
+
+    # Merge: append new tasks, fill in nulls
+    updated = dict(existing_context)
+    if result.get("goal") and not updated.get("goal"):
+        updated["goal"] = result["goal"]
+        
+    if result.get("tasks"):
+        ex = updated.get("tasks")
+        ex = ex if isinstance(ex, list) else ([ex] if ex else [])
+        updated["tasks"] = ex + [t for t in result["tasks"] if t not in ex]
+        
+    if result.get("duration") and not updated.get("duration"):
+        updated["duration"] = result["duration"]
+        
+    if result.get("fixed_events"):
+        ex = updated.get("fixed_events")
+        ex = ex if isinstance(ex, list) else ([ex] if ex else [])
+        updated["fixed_events"] = ex + result["fixed_events"]
+        
+    if result.get("constraints"):
+        ex = updated.get("constraints")
+        ex = ex if isinstance(ex, list) else ([ex] if ex else [])
+        updated["constraints"] = ex + result["constraints"]
+        
+    if result.get("answer_to_pending") and pending_key:
+        ans = result["answer_to_pending"]
+        if pending_key in ("tasks", "fixed_events", "constraints"):
+            ex = updated.get(pending_key)
+            ex = ex if isinstance(ex, list) else ([ex] if ex else [])
+            if ans not in ex:
+                updated[pending_key] = ex + [ans]
+        else:
+            updated[pending_key] = ans
+            
+    if result.get("goal_has_duration") is True:
+        updated["goal_has_duration"] = True
+
+    return updated
+
+
+async def apply_schedule_edit(
+    edit_request: str,
+    generated_routines: list[dict],
+    current_time: str | None = None,
+) -> tuple[list[dict], str]:
+    """
+    Apply a targeted edit to an existing generated schedule without full regeneration.
+    Returns (updated_routines, summary_message).
+
+    Supported edits:
+    - Move/reschedule: "move SQL to 9 PM"
+    - Add: "add lunch break at 1 PM"
+    - Remove: "remove groceries"
+    - Shift earlier/later: "make gym 30 minutes earlier"
+    """
+    routines_json = json.dumps(generated_routines, default=str)
+    time_ctx = f"Current time: {current_time}." if current_time else ""
+
+    system_prompt = f"""You are a schedule editor. Apply the user's requested change to the existing schedule.
+{time_ctx}
+
+Return ONLY JSON in this exact format:
+{{
+  "updated_routines": [
+    {{
+      "title": "...",
+      "date": "YYYY-MM-DD",
+      "start_time": "HH:MM:SS",
+      "end_time": "HH:MM:SS",
+      "priority": "High|Medium|Low",
+      "status": "Pending",
+      "estimated_time": 60,
+      "focus_mode_recommended": false,
+      "is_internal": false,
+      "description": "...",
+      "suggestion": "..."
+    }}
+  ],
+  "edit_summary": "One sentence describing what was changed."
+}}
+
+Rules:
+- Apply ONLY the requested change. Keep all other tasks exactly the same.
+- For time changes: use 24-hour HH:MM:SS format.
+- For removals: omit the task entirely.
+- For additions: add a new task with reasonable defaults.
+- "edit_summary" must be one short sentence describing the change.
+"""
+    result = await _groq_chat_json_async(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Current schedule:\n{routines_json}\n\nEdit request: {edit_request}"},
+        ],
+        temperature=0.15,
+    )
+    if not result or "updated_routines" not in result:
+        return generated_routines, "I couldn't apply that edit. Could you rephrase it?"
+
+    return result["updated_routines"], result.get("edit_summary", "Schedule updated.")
+
+
+
+
+async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | None = None, existing_blocks: list[tuple[datetime, datetime]] | None = None, user_memory_context: list[str] | None = None) -> AIAnalysisResponse:
     """Phase 1: Analyze the user's request and determine if clarification is needed."""
     start_after = None
     if current_time:
@@ -947,6 +1428,41 @@ async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | 
         except ValueError:
             pass
 
+    intent = await classify_intent_with_groq(input_text)
+    
+    if intent == "Greeting":
+        return AIAnalysisResponse(
+            needs_clarification=False,
+            result=AIGenerationResponse(
+                summary="Hi! What would you like to plan today?",
+                productivity_tips=[], routines=[]
+            )
+        )
+    if intent == "Small Talk":
+        return AIAnalysisResponse(
+            needs_clarification=False,
+            result=AIGenerationResponse(
+                summary="I'm ready to help plan your day. What tasks or goals would you like to schedule?",
+                productivity_tips=[], routines=[]
+            )
+        )
+    if intent == "Unrelated Question":
+        return AIAnalysisResponse(
+            needs_clarification=False,
+            result=AIGenerationResponse(
+                summary="I'm designed specifically for planning, scheduling, productivity, and routine building. Tell me what you'd like to accomplish today.",
+                productivity_tips=[], routines=[]
+            )
+        )
+    if intent == "Vague Request":
+        return AIAnalysisResponse(
+            needs_clarification=False,
+            result=AIGenerationResponse(
+                summary="How would you define a productive day? Are there specific tasks you want to accomplish?",
+                productivity_tips=[], routines=[]
+            )
+        )
+
     parsed = await _analyze_with_groq(input_text, current_time)
 
     if not parsed or not parsed.get("has_actionable_intent"):
@@ -954,18 +1470,18 @@ async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | 
             return AIAnalysisResponse(
                 needs_clarification=False,
                 result=AIGenerationResponse(
-                    summary="I couldn't find any actionable tasks in that request. Please try describing your plans clearly.",
+                    summary="I still need a few details before I can create your schedule. Could you specify what tasks you'd like to do, or how long they might take?",
                     productivity_tips=[],
                     routines=[],
                 ),
             )
         return AIAnalysisResponse(
             needs_clarification=False,
-            result=generate_heuristic_plan(input_text, plan_scope, start_after),
+            result=generate_heuristic_plan(input_text, plan_scope, start_after, existing_blocks=existing_blocks),
         )
 
     # Build clarification questions
-    questions = _build_clarification_questions(parsed, max_questions=2)
+    questions = _build_clarification_questions(parsed, max_questions=2, user_memory_context=user_memory_context)
 
     if questions:
         return AIAnalysisResponse(
@@ -976,29 +1492,40 @@ async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | 
     # High confidence — generate directly
     groq_tasks = parsed.get("tasks", [])
     personality = parsed.get("inferred_personality", "Balanced")
-    planned_routines, flex_tasks = _optimize_schedule(groq_tasks, plan_scope, start_after, personality)
+    planned_routines, flex_tasks, explanation_pts, is_over, total_mins, avail_mins, val_warns = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, existing_blocks=existing_blocks, user_memory_context=user_memory_context)
+
+    if is_over:
+        # Build deferral suggestions from lowest-priority tasks
+        suggested = [t.get("title", "task") for t in sorted(groq_tasks, key=lambda x: x.get("urgency_score", 5))[:2]]
+        return AIAnalysisResponse(
+            needs_clarification=False,
+            result=AIGenerationResponse(
+                summary=f"This plan requires {total_mins} minutes but only {avail_mins} are available.",
+                productivity_tips=[],
+                routines=planned_routines,
+                explanation_points=explanation_pts,
+                is_overloaded=True,
+                overload_message=f"Your requested tasks need {total_mins} minutes, but you only have {avail_mins} minutes available today.",
+                suggested_deferrals=suggested,
+            ),
+        )
 
     if planned_routines:
         avg_confidence = sum(t.get("confidence", 1.0) for t in groq_tasks) / len(groq_tasks) if groq_tasks else 1.0
-        explanations = [f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus."]
-        for t in flex_tasks:
-            if t.get("requires_business_hours"):
-                explanations.append(f"{t.get('title')} was constrained to business hours (10 AM - 9 PM).")
-            if t.get("requires_focus"):
-                explanations.append(f"{t.get('title')} was placed to avoid fragmentation.")
 
         return AIAnalysisResponse(
             needs_clarification=False,
             result=AIGenerationResponse(
-                summary=" ".join(explanations[:2]), # Keep summary brief
-                explanation=" ".join(explanations),
+                summary="Your optimized schedule is ready.",
+                explanation="\n".join(explanation_pts) if explanation_pts else None,
                 schedule_confidence=round(avg_confidence, 2),
                 productivity_tips=[
                     "Tasks were grouped by context to minimize mental switching.",
-                    "Recovery breaks were automatically injected after intense focus blocks.",
-                    "Your schedule respects your natural cognitive energy levels."
+                    "Recovery breaks and meals were injected to keep your energy steady.",
+                    "Long focus tasks were split into deep-work blocks with buffers."
                 ],
                 routines=planned_routines,
+                explanation_points=explanation_pts,
             ),
         )
 
@@ -1008,7 +1535,7 @@ async def analyze_ai_plan(input_text: str, plan_scope: str, current_time: str | 
     )
 
 
-async def generate_ai_plan(input_text: str, plan_scope: str, current_time: str | None = None, clarifications: dict[str, str] | None = None) -> AIGenerationResponse:
+async def generate_ai_plan(input_text: str, plan_scope: str, current_time: str | None = None, clarifications: dict[str, str] | None = None, user_memory_context: list[str] | None = None, existing_blocks: list[tuple[datetime, datetime]] | None = None) -> AIGenerationResponse:
     """Phase 2: Generate the schedule, optionally applying user clarifications."""
     today = date.today().isoformat()
     start_after = None
@@ -1021,6 +1548,11 @@ async def generate_ai_plan(input_text: str, plan_scope: str, current_time: str |
             pass
         time_context_prompt = f"The user's current local time is: {current_time}. Schedule strictly AFTER this time."
 
+    memory_prompt = ""
+    if user_memory_context:
+        mem_str = "\n".join([f"- {m}" for m in user_memory_context])
+        memory_prompt = f"\nUSER PAST BEHAVIORAL MEMORY:\n{mem_str}\n\nIMPORTANT: Accommodate the user's past behavioral preferences when scheduling their tasks."
+
     system_prompt = f"""You are a Cognitive Scheduling Assistant. You schedule tasks based on human energy, mental fatigue, context switching, and realistic flow.
 Analyze the user's natural language request and extract tasks with deep psychological reasoning.
 
@@ -1028,6 +1560,7 @@ Output STRICT JSON matching this schema:
 {{
   "has_actionable_intent": true/false,
   "inferred_personality": "Balanced",
+  "new_behavioral_insights": ["Pattern Type: The insight", ...],
   "tasks": [
     {{
       "title": "Short Clean Task Name",
@@ -1043,6 +1576,9 @@ Output STRICT JSON matching this schema:
       "ideal_time_of_day": "morning|afternoon|evening|night|any",
       "energy_requirement": "High|Medium|Low",
       "cognitive_load": "high|medium|low",
+      "urgency_score": 1-10,
+      "importance_score": 1-10,
+      "deadline_score": 1-10,
       "context_group": "Development",
       "focus_mode_recommended": true/false,
       "is_internal_logistic": true/false,
@@ -1053,15 +1589,17 @@ Output STRICT JSON matching this schema:
 
 Rules:
 1. INTENT: If the input is random noise, set has_actionable_intent=false and return an empty tasks array.
-2. COGNITIVE LOAD: Accurately estimate 'energy_requirement'.
+2. TIME CONSTRAINTS (CRITICAL): ONLY output a time_constraint (HH:MM) if the user EXPLICITLY provided a specific time for that exact task (e.g., "Movie at 9pm"). NEVER invent or guess times for flexible tasks. If a task has no explicit time, set is_fixed_time=false and time_constraint=null.
 3. CONTEXT: Assign the same 'context_group' string to similar tasks to minimize context switching.
-4. TIME CONSTRAINTS: Only output a time_constraint (HH:MM) if the user explicitly provided a time.
+4. COGNITIVE LOAD: Accurately estimate 'energy_requirement'.
 5. NO HALLUCINATION: DO NOT invent tasks the user didn't mention.
-6. REALISM: For out-of-house events (movies=150-180min, gym=60-90min), estimate realistic durations and set requires_travel=true.
+6. REALISM: For out-of-house events, estimate realistic durations and set requires_travel=true.
 7. TRAVEL TIER: "nearby" (15min buffer), "moderate" (30min buffer), "long_travel" (60min buffer).
-8. INTERNAL LOGISTICS: Set `is_internal_logistic = true` ONLY for purely internal spacing tasks like "returning home", generic transitions, or passive movement. If it's a primary human activity (e.g., "Movie", "Dinner"), set it to `false`. "Flight to Delhi" is an event, so it's `false`. "Return home" is usually just logistical, so `true`.
+8. INTERNAL LOGISTICS: Set `is_internal_logistic = true` ONLY for purely internal spacing tasks like "returning home", generic transitions, or passive movement.
 9. ANTI-HALLUCINATION: Do not invent locations, durations, or commitments. If uncertain, ask (set confidence < 0.7).
-10. {time_context_prompt}"""
+10. CURRENT TIME CONTEXT: {time_context_prompt} You are scheduling for the REMAINDER of the day. Do not schedule tasks in the past. If the user asks you to schedule flexible tasks, they must be placed AFTER the current time. Do not set time_constraints of 00:00 or 12:00 AM unless explicitly requested.
+11. BEHAVIORAL MEMORY: Extract any explicitly stated new behavioral rules or preferences the user mentions in their prompt (e.g., "I like working out at night", "never schedule deep work after 5pm"). Output them as a list of strings formatted as 'Pattern Type: Insight' in 'new_behavioral_insights'. If none, return [].{memory_prompt}
+"""
 
     user_prompt = f"Today is {today}. Parse this request:\n\n{input_text}"
 
@@ -1076,6 +1614,7 @@ Rules:
     if parsed and parsed.get("has_actionable_intent"):
         groq_tasks = parsed.get("tasks", [])
         personality = parsed.get("inferred_personality", "Balanced")
+        new_insights = parsed.get("new_behavioral_insights", [])
 
         # Apply user clarifications
         if clarifications:
@@ -1100,37 +1639,50 @@ Rules:
                     except (ValueError, IndexError):
                         pass
 
-        planned_routines, flex_tasks = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, travel_overrides=travel_overrides or None)
+        planned_routines, flex_tasks, explanation_pts, is_over, total_mins, avail_mins, val_warns = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, travel_overrides=travel_overrides or None, existing_blocks=existing_blocks, user_memory_context=user_memory_context, clarifications=clarifications)
         
+        if is_over and not planned_routines:
+            suggested = [t.get("title", "task") for t in sorted(groq_tasks, key=lambda x: x.get("urgency_score", 5))[:2]]
+            return AIGenerationResponse(
+                summary=f"This plan requires {total_mins} minutes but only {avail_mins} are available.",
+                productivity_tips=[],
+                routines=[],
+                explanation_points=explanation_pts,
+                is_overloaded=True,
+                overload_message=f"Your requested tasks need {total_mins} minutes, but you only have {avail_mins} minutes available today.",
+                validation_warnings=val_warns,
+                suggested_deferrals=suggested,
+                new_behavioral_insights=new_insights
+            )
+
         if planned_routines:
             avg_confidence = sum(t.get("confidence", 1.0) for t in groq_tasks) / len(groq_tasks) if groq_tasks else 1.0
-            explanations = [f"Intelligently generated a {personality.lower()} schedule optimized for human energy and focus."]
-            for t in flex_tasks:
-                if t.get("requires_business_hours"):
-                    explanations.append(f"{t.get('title')} was constrained to business hours (10 AM - 9 PM).")
-                if t.get("requires_focus"):
-                    explanations.append(f"{t.get('title')} was placed to avoid fragmentation.")
 
             return AIGenerationResponse(
-                summary=" ".join(explanations[:2]), # Keep summary brief
-                explanation=" ".join(explanations),
+                summary="Your optimized schedule is ready.",
+                explanation="\n".join(explanation_pts) if explanation_pts else None,
                 schedule_confidence=round(avg_confidence, 2),
                 productivity_tips=[
                     "Tasks were grouped by context to minimize mental switching.",
-                    "Recovery breaks were automatically injected after intense focus blocks.",
-                    "Your schedule respects your natural cognitive energy levels."
+                    "Recovery breaks and meals were injected to keep your energy steady.",
+                    "Long focus tasks were split into deep-work blocks with buffers."
                 ],
                 routines=planned_routines,
+                explanation_points=explanation_pts,
+                is_overloaded=is_over,
+                overload_message=f"Your requested tasks need {total_mins} minutes, but only {avail_mins} are available. Some tasks may have been shortened." if is_over else None,
+                validation_warnings=val_warns,
+                new_behavioral_insights=new_insights
             )
 
     if parsed and not parsed.get("has_actionable_intent"):
         return AIGenerationResponse(
-            summary="I couldn't find any actionable tasks in that request. Please try describing your plans clearly.",
+            summary="I still need a few details before I can create your schedule. Could you specify what tasks you'd like to do, or how long they might take?",
             productivity_tips=[],
             routines=[],
         )
 
-    return generate_heuristic_plan(input_text, plan_scope, start_after)
+    return generate_heuristic_plan(input_text, plan_scope, start_after, existing_blocks=existing_blocks)
 
 def generate_workspace_ai_tasks(
     prompt: str,

@@ -57,8 +57,21 @@ class RoutineBase(BaseModel):
     focus_mode_recommended: bool = Field(default=False)
     is_internal: bool = Field(default=False)
     suggestion: Optional[str] = Field(default=None, max_length=2000)
+    session_id: Optional[int] = Field(default=None)
 
-    @field_validator("description", "suggestion", mode="before")
+    # V2: Cognitive Intelligence fields
+    energy_score: int = Field(5, ge=1, le=10)
+    complexity_score: int = Field(5, ge=1, le=10)
+    urgency_score: int = Field(5, ge=1, le=10)
+    importance_score: int = Field(5, ge=1, le=10)
+    deadline_score: int = Field(3, ge=1, le=10)
+    location: Optional[str] = None
+    deadline: Optional[datetime] = None
+    category: Optional[str] = Field(default=None, max_length=100)
+    scheduling_reason: Optional[str] = Field(default=None, max_length=2000)
+    fixed_time: bool = Field(default=False)
+
+    @field_validator("description", "suggestion", "scheduling_reason", mode="before")
     @classmethod
     def normalize_optional_text(cls, value):
         if value in ("", "null"):
@@ -91,10 +104,10 @@ class RoutineBase(BaseModel):
     @field_validator("status")
     @classmethod
     def validate_status(cls, value: str) -> str:
-        allowed = {"Pending", "Completed"}
+        allowed = {"Pending", "Completed", "Partial", "Skipped"}
         normalized = value.capitalize()
         if normalized not in allowed:
-            raise ValueError("Status must be Pending or Completed.")
+            raise ValueError("Status must be Pending, Completed, Partial, or Skipped.")
         return normalized
 
 
@@ -111,10 +124,14 @@ class RoutineUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
     estimated_time: Optional[int] = Field(default=None, ge=5, le=720)
+    actual_duration: Optional[int] = Field(default=None, ge=1, le=1440)
     focus_mode_recommended: Optional[bool] = None
     suggestion: Optional[str] = Field(default=None, max_length=2000)
+    category: Optional[str] = Field(default=None, max_length=100)
+    scheduling_reason: Optional[str] = Field(default=None, max_length=2000)
+    location: Optional[str] = Field(default=None, max_length=500)
 
-    @field_validator("description", "suggestion", mode="before")
+    @field_validator("description", "suggestion", "scheduling_reason", mode="before")
     @classmethod
     def normalize_optional_text(cls, value):
         if value in ("", "null"):
@@ -151,19 +168,76 @@ class RoutineUpdate(BaseModel):
     def validate_status(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
-        allowed = {"Pending", "Completed"}
+        allowed = {"Pending", "Completed", "Partial", "Skipped"}
         normalized = value.capitalize()
         if normalized not in allowed:
-            raise ValueError("Status must be Pending or Completed.")
+            raise ValueError("Status must be Pending, Completed, Partial, or Skipped.")
         return normalized
 
 
 class RoutineOut(RoutineBase):
     id: int
     user_id: str
+    session_id: Optional[int] = None
+    created_at: datetime
+    actual_duration: Optional[int] = None
+    deadline: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RoutineSessionOut(BaseModel):
+    id: int
+    user_id: str
+    conversation_id: Optional[int] = None
+    scheduled_for: routine_date
+    status: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ConflictCheckRequest(BaseModel):
+    routine_id: int
+    new_start_time: Optional[time] = None
+    new_end_time: Optional[time] = None
+    new_date: Optional[routine_date] = None
+    new_estimated_time: Optional[int] = None
+
+
+class ConflictingRoutineInfo(BaseModel):
+    id: int
+    title: str
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ConflictCheckResponse(BaseModel):
+    has_conflict: bool
+    conflicting_routines: list[ConflictingRoutineInfo] = []
+    message: str = ""
+
+
+class DailyReviewCarryForward(BaseModel):
+    id: int
+    title: str
+    status: str
+    category: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DailyReviewResponse(BaseModel):
+    completed_count: int
+    skipped_count: int
+    partial_count: int
+    pending_count: int
+    total_focus_minutes: int
+    total_recovery_minutes: int
+    carry_forward: list[DailyReviewCarryForward] = []
+    summary_message: str
 
 
 class AIGenerationRequest(BaseModel):
@@ -194,6 +268,15 @@ class AIPlannedRoutine(BaseModel):
     is_internal: bool = False
     suggestion: str
 
+    # V2: Cognitive Intelligence fields
+    energy_score: int = 5
+    complexity_score: int = 5
+    urgency_score: int = 5
+    location: Optional[str] = None
+    category: Optional[str] = None
+    scheduling_reason: Optional[str] = None
+    fixed_time: bool = False
+
 
 class AIGenerationResponse(BaseModel):
     summary: str
@@ -201,6 +284,12 @@ class AIGenerationResponse(BaseModel):
     routines: list[AIPlannedRoutine]
     schedule_confidence: float = Field(default=1.0)
     explanation: Optional[str] = None
+    explanation_points: list[str] = Field(default_factory=list, description="Max 3 concise scheduling decisions")
+    is_overloaded: bool = False
+    overload_message: Optional[str] = None
+    validation_warnings: Optional[list[str]] = None
+    suggested_deferrals: list[str] = Field(default_factory=list)
+    new_behavioral_insights: list[str] = Field(default_factory=list, description="New behavioral rules or preferences inferred from the user prompt. Format: 'Pattern Type: Insight'")
 
 
 class AIClarificationOption(BaseModel):
@@ -241,12 +330,27 @@ class AIGenerationWithClarifications(BaseModel):
 
 
 class DashboardStats(BaseModel):
-    total_routines: int
-    completed_routines: int
-    pending_routines: int
-    today_routines: int
+    # Today-scoped
+    today_total: int
+    today_completed: int
+    today_pending: int
+
+    # This-week-scoped
+    week_total: int
+    week_completed: int
+    week_pending: int
+
+    # Computed score (0-100) based on this week
     productivity_score: int
-    weekly_overview: list[dict]
+    completion_rate: float  # 0.0 – 1.0
+
+    # Legacy aliases kept for backward compat with existing UI cards
+    total_routines: int       # = week_total
+    completed_routines: int   # = week_completed
+    pending_routines: int     # = week_pending
+    today_routines: int       # = today_total
+
+    weekly_overview: list[dict]  # [{date, total, completed}]
 
 
 class ProjectTaskBase(BaseModel):
@@ -640,3 +744,102 @@ class UserPreferenceOut(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ─── Orbit Schemas ─────────────────────────────────────────────────────────
+
+class OrbitMessageOut(BaseModel):
+    id: int
+    conversation_id: int
+    role: str
+    content: str
+    message_type: str
+    metadata_json: Optional[dict] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrbitConversationOut(BaseModel):
+    id: int
+    user_id: str
+    title: str
+    status: str
+    original_prompt: Optional[str] = None
+    clarification_answers: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
+    messages: list[OrbitMessageOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrbitConversationCreate(BaseModel):
+    title: str = Field(default="New Conversation", max_length=255)
+
+
+class OrbitConversationUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+
+
+class OrbitSessionOut(BaseModel):
+    id: int
+    user_id: str
+    conversation_id: Optional[int] = None
+    status: str
+    current_state: str
+    context_json: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrbitChatRequest(BaseModel):
+    conversation_id: Optional[int] = None  # None = create new conversation
+    user_message: str = Field(..., min_length=1, max_length=5000)
+    plan_scope: str = Field(default="today")
+    current_time: Optional[str] = None
+    timezone: Optional[str] = Field(default=None, description="IANA timezone string e.g. 'Asia/Kolkata'")
+    # For Phase 2: clarification answers sent with follow-up
+    clarifications: Optional[dict[str, str]] = None
+    # Internal: indicate this is a follow-up after clarification
+    is_clarification_response: bool = False
+
+
+class OrbitChatResponse(BaseModel):
+    conversation_id: int
+    session_id: Optional[int] = None       # active orbit session id
+    messages: list[OrbitMessageOut]        # new messages to append to chat
+    routines_created: int = 0
+    status: str = Field(default="COMPLETE")
+    session_state: Optional[str] = None    # current state machine state
+
+
+
+class OrbitTaskMemoryCreate(BaseModel):
+    routine_id: Optional[int] = None
+    task_title: str = Field(..., max_length=255)
+    task_date: routine_date
+    status: str  # completed | skipped | deferred
+    deferred_to: Optional[routine_date] = None
+
+
+class OrbitTaskMemoryOut(BaseModel):
+    id: int
+    user_id: str
+    routine_id: Optional[int]
+    task_title: str
+    task_date: routine_date
+    status: str
+    deferred_to: Optional[routine_date]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrbitIncompleteTasksResponse(BaseModel):
+    has_incomplete: bool
+    tasks: list[OrbitTaskMemoryOut]
+    checked_at: datetime
+

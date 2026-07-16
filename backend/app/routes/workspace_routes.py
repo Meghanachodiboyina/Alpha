@@ -130,6 +130,27 @@ def delete_workspace_project(
     crud.delete_workspace_project(db, project)
 
 
+@router.delete("/workspace/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
+def revoke_workspace_invite(
+    request: Request,
+    invite_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from ..models import WorkspaceInvite
+    invite = db.query(WorkspaceInvite).filter(WorkspaceInvite.id == invite_id).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found.")
+        
+    # Only the inviter or the invitee can revoke/leave
+    if invite.inviter_user_id != str(current_user.id) and invite.invitee_email != current_user.email:
+        raise HTTPException(status_code=403, detail="Not authorized to revoke this invite.")
+        
+    db.delete(invite)
+    db.commit()
+
+
 @router.post("/workspace/tasks", response_model=schemas.WorkspaceTaskOut, status_code=status.HTTP_201_CREATED)
 @limiter.limit("60/minute")
 def create_workspace_task(
@@ -153,6 +174,10 @@ def update_workspace_task(
     db_task = crud.get_workspace_task_by_id(db, task_id, current_user.id)
     if not db_task:
         raise HTTPException(status_code=404, detail="Workspace task not found.")
+    
+    if not crud.check_workspace_task_edit_permission(db, db_task, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to edit this task.")
+        
     return crud.update_workspace_task(db, db_task, payload)
 
 
@@ -167,8 +192,14 @@ def delete_workspace_task(
     db_task = crud.get_workspace_task_by_id(db, task_id, current_user.id)
     if not db_task:
         raise HTTPException(status_code=404, detail="Workspace task not found.")
+        
+    if not crud.check_workspace_task_edit_permission(db, db_task, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this task.")
+        
     crud.delete_workspace_task(db, db_task)
 
+
+from ..quota import check_and_increment_ai_quota
 
 @router.post("/workspace/ai-generate", response_model=schemas.WorkspaceAIGenerateResponse)
 @limiter.limit("60/minute")
@@ -178,6 +209,7 @@ def ai_generate_workspace_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    check_and_increment_ai_quota(db, current_user, "routine_generations")
     projects = crud.get_workspace_projects(db, current_user)
     members = crud.get_workspace_members(db, current_user)
     available_projects = [p.name for p in projects]
