@@ -5,7 +5,6 @@ import {
   Database,
   Download,
   Monitor,
-  PenTool,
   Rocket,
   Sparkles,
   UserRound,
@@ -19,15 +18,15 @@ const leadershipMembers = [
     role: "CEO, FlyersSoft",
     name: "Uday Kanth",
     description:
-      "Provides leadership, mentorship, and opportunities that empower aspiring developers and innovative projects to grow and succeed.",
+      "Provides leadership and opportunities that empower aspiring developers and innovative projects to grow and succeed.",
     icon: UserRound,
     image: "/team/uday-kanth.jpg",
   },
   {
-    role: "Project Manager",
+    role: "Product Owner",
     name: "Krishna Kompalli",
     description:
-      "Leads project planning, coordination, and execution while ensuring smooth collaboration and timely delivery of project goals.",
+      "Owns the product vision ,aligns stakeholder needs, and guides the team toward sucessful product delivery.",
     icon: UserRound,
     image: "/team/krishna-kompalli.jpg",
   },
@@ -51,7 +50,7 @@ const coreTeamMembers = [
   {
     role: "AI Product Engineer",
     name: "Prakhyath Sai Ponduru",
-    description: "Leads AI systems, product design, and user experience — architecting Orbit's planning intelligence and the overall product vision.",
+    description: "Leads AI systems, product design and UX-architecting Orbit's planning intelligence.",
     icon: Cpu,
     image: "/team/prakhyath-sai-ponduru.jpg",
   },
@@ -69,7 +68,7 @@ export default function AboutPage() {
 
   return (
     <div
-      data-theme="dark"
+      className="about-page"
       style={{ background: "var(--bg)", minHeight: "100vh", color: "var(--text)" }}
     >
       <Navbar />
@@ -114,7 +113,7 @@ export default function AboutPage() {
                 style={{
                   maxWidth: 640,
                   marginInline: "auto",
-                  color: "#c7c7d1",
+                  color: "var(--text-2)",
                 }}
               >
                 Routinely is proudly built by the Flyerssoft team. We focus on
@@ -141,7 +140,7 @@ export default function AboutPage() {
               <h2 className="h2" style={{ maxWidth: 820, marginBottom: "0.8rem" }}>
                 Meet the people who make Routinely possible
               </h2>
-              <p className="body-lg text-muted" style={{ color: "#b8b8c4" }}>
+              <p className="body-lg text-muted" style={{ color: "var(--text-2)" }}>
                 Different skills, one goal: to make daily planning smart,
                 simple, and stress-free for everyone.
               </p>
@@ -182,7 +181,7 @@ export default function AboutPage() {
                       key={`${member.role}-${member.name}`}
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "minmax(180px, 240px) 1fr",
+                        gridTemplateColumns: "minmax(160px, 210px) 1fr",
                         gap: "1.4rem",
                         alignItems: "start",
                         animationDelay: `${index * 0.06}s`,
@@ -199,6 +198,7 @@ export default function AboutPage() {
                           objectPosition:
                             member.name === "Krishna Kompalli" ? "center -16px" : "center top",
                           borderRadius: 8,
+                          marginInline: "auto",
                           boxShadow: "0 22px 46px rgba(0,0,0,0.34)",
                         }}
                       />
@@ -231,7 +231,7 @@ export default function AboutPage() {
                         >
                           {member.name}
                         </h3>
-                        <p className="body-md text-muted about-leadership-description" style={{ color: "#d3d3dc", lineHeight: 1.75 }}>
+                        <p className="body-md text-muted about-leadership-description" style={{ color: "var(--text-2)", lineHeight: 1.75 }}>
                           {member.description}
                         </p>
                       </div>
@@ -252,7 +252,7 @@ export default function AboutPage() {
               >
                 <UsersRound size={24} strokeWidth={1.8} />
                 <span className="caption" style={{ color: "var(--text)", letterSpacing: "0.08em" }}>
-                  Core Team
+                  Co-Founders
                 </span>
               </div>
 
@@ -328,7 +328,7 @@ export default function AboutPage() {
                         >
                           {member.name}
                         </h3>
-                        <p className="body-sm text-muted about-core-description" style={{ color: "#d3d3dc", fontSize: "0.9rem", lineHeight: 1.65 }}>
+                        <p className="body-sm text-muted about-core-description" style={{ color: "var(--text-2)", fontSize: "0.9rem", lineHeight: 1.65 }}>
                           {member.description}
                         </p>
                       </div>
@@ -347,9 +347,8 @@ export default function AboutPage() {
               style={{
                 padding: "clamp(2rem, 5vw, 3rem)",
                 textAlign: "center",
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
-                borderColor: "rgba(255,255,255,0.09)",
+                background: "var(--bg-2)",
+                borderColor: "var(--border)",
                 borderRadius: 18,
               }}
             >
@@ -368,7 +367,7 @@ export default function AboutPage() {
               </h2>
               <p
                 className="body-lg text-muted"
-                style={{ maxWidth: 720, marginInline: "auto", color: "#c7c7d1" }}
+                style={{ maxWidth: 720, marginInline: "auto", color: "var(--text-2)" }}
               >
                 Flyerssoft is a technology company focused on building modern
                 web and mobile applications with clean design and intelligent
@@ -383,9 +382,8 @@ export default function AboutPage() {
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
                 marginTop: "1rem",
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
-                borderColor: "rgba(255,255,255,0.09)",
+                background: "var(--bg-2)",
+                borderColor: "var(--border)",
                 borderRadius: 18,
                 overflow: "hidden",
               }}
@@ -410,7 +408,7 @@ export default function AboutPage() {
                   >
                     <InfoIcon size={42} color="var(--orange)" strokeWidth={1.6} />
                     <div>
-                      <div className="body-sm text-muted" style={{ color: "#b8b8c4" }}>
+                      <div className="body-sm text-muted" style={{ color: "var(--text-2)" }}>
                         {item.label}
                       </div>
                       <div
@@ -450,9 +448,8 @@ export default function AboutPage() {
                 flexWrap: "wrap",
                 gap: "1.25rem",
                 padding: "clamp(1.25rem, 3vw, 2rem)",
-                background:
-                  "linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))",
-                borderColor: "rgba(255,255,255,0.1)",
+                background: "var(--bg-2)",
+                borderColor: "var(--border)",
                 borderRadius: "14px",
               }}
             >

@@ -39,19 +39,7 @@ export default function AboutSection() {
             </div>
 
             {/* Founder credit */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              whileInView={{ opacity: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.4 }}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', marginTop: '2rem', padding: '1rem 1.25rem', background: 'rgba(255,107,53,0.05)', border: '1px solid rgba(255,107,53,0.15)', borderRadius: 16 }}
-            >
-              <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'linear-gradient(135deg, #ff6b35, #ff9f6b)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: '#fff', flexShrink: 0 }}>P</div>
-              <div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>Prakhyath Sai Ponduru</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>AI Product Engineer · AI Systems, Product Design, UX</div>
-              </div>
-            </motion.div>
+            
           </motion.div>
 
           {/* Right: Phone with Orbit */}
