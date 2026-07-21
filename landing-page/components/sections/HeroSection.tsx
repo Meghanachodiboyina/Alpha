@@ -141,15 +141,7 @@ export default function HeroSection({
               </button>
             </div>
 
-            <p
-              style={{
-                marginTop: '2rem',
-                fontSize: '0.8rem',
-                color: 'var(--text-3)',
-              }}
-            >
-              Free on Android · No account required
-            </p>
+            
           </motion.div>
 
           {/* ── Right: Exact Phone Demo ── */}
