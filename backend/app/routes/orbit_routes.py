@@ -193,6 +193,24 @@ def delete_conversation(
 
 # ─── Main Chat Endpoint ─────────────────────────────────────────────────────
 
+@router.post("/chat/precheck")
+@limiter.limit("20/minute")
+async def orbit_chat_precheck(
+    request: Request,
+    payload: schemas.OrbitChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ctx = {}
+    if payload.conversation_id:
+        orbit_session = crud.get_or_create_orbit_session(db, current_user.id, payload.conversation_id)
+        ctx = dict(orbit_session.context_json or {})
+    
+    intent = await classify_orbit_intent(payload.user_message, ctx)
+    is_heavy = intent in ("planning_request", "schedule_edit", "clarification_response")
+    return {"intent": intent, "is_heavy": is_heavy}
+
+
 @router.post("/chat", response_model=schemas.OrbitChatResponse)
 @limiter.limit("10/minute")
 async def orbit_chat(
@@ -252,11 +270,27 @@ async def orbit_chat(
     try:
         check_and_increment_ai_quota(db, current_user, "analysis_requests")
         # ── 4. Classify intent with full context awareness ───────────────────
-        intent = await classify_orbit_intent(payload.user_message, ctx)
+        if payload.client_intent:
+            intent = payload.client_intent
+        else:
+            intent = await classify_orbit_intent(payload.user_message, ctx)
 
         # ── 5. Handle non-planning intents first (regardless of state) ───────
         if intent == "greeting":
             reply = "Hi! I'm Orbit. Tell me your tasks, goals, or plans and I'll build your perfect schedule. ✦"
+            msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
+            new_messages.append(msg)
+            return schemas.OrbitChatResponse(
+                conversation_id=convo.id,
+                session_id=orbit_session.id,
+                messages=[schemas.OrbitMessageOut.model_validate(m) for m in new_messages],
+                routines_created=0,
+                status=state,
+                session_state=state,
+            )
+
+        if intent == "gratitude":
+            reply = "You're very welcome! Let me know if you need to adjust your schedule or plan anything else. ✦"
             msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
             new_messages.append(msg)
             return schemas.OrbitChatResponse(
@@ -508,16 +542,6 @@ async def orbit_chat(
             db.commit()
 
             # Build enriched prompt from accumulated context
-            # If the user asked to pull in their overdue/pending backlog, fetch
-            # the real tasks from the DB and add them to the plan.
-            combined_text = f"{convo.original_prompt or ''} {payload.user_message} {' '.join(ctx.get('tasks', []))}".lower()
-            if any(kw in combined_text for kw in ("overdue", "pending task", "backlog", "incomplete", "unfinished", "missed task")):
-                overdue_titles = crud.get_overdue_routine_titles(db, str(current_user.id))
-                if overdue_titles:
-                    existing = ctx.get("tasks") if isinstance(ctx.get("tasks"), list) else []
-                    merged = existing + [t for t in overdue_titles if t not in existing]
-                    ctx["tasks"] = merged
-                    crud.update_orbit_context(db, orbit_session, ctx)
 
             enriched_prompt = payload.user_message
             if ctx.get("tasks"):
@@ -559,7 +583,10 @@ async def orbit_chat(
 
             # Determine scheduled date
             try:
-                scheduled_date = date.fromisoformat(now_iso[:10])
+                if ai_plan.target_date:
+                    scheduled_date = date.fromisoformat(ai_plan.target_date)
+                else:
+                    scheduled_date = date.fromisoformat(now_iso[:10])
             except Exception:
                 scheduled_date = date.today()
 
@@ -590,6 +617,16 @@ async def orbit_chat(
                 )
 
             if ai_plan.routines:
+                # Cleanup previous generated routines in this conversation
+                routine_sessions = db.query(RoutineSession).filter(
+                    RoutineSession.conversation_id == convo.id
+                ).all()
+                for rs in routine_sessions:
+                    for r in list(rs.routines):
+                        db.delete(r)
+                    db.delete(rs)
+                db.commit()
+
                 routine_session = crud.create_routine_session(
                     db, current_user.id, scheduled_date, conversation_id=convo.id
                 )
@@ -770,6 +807,7 @@ def get_incomplete_tasks(
             Routine.date < today,
             Routine.status != "Completed",
             Routine.is_internal == False,
+            Routine.fixed_time == False,  # Don't carry over fixed events like movies/flights
         )
         .order_by(Routine.date.desc())
         .limit(20)

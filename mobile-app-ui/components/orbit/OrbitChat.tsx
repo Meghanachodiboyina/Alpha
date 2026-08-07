@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, StyleSheet, View, Text } from 'react-native';
+import { FlatList, StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { OrbitMsg } from './orbitTypes';
 import ChatMessage from './ChatMessage';
 import SchedulePreviewCard from './SchedulePreviewCard';
@@ -98,6 +98,11 @@ function RecoveryCard({
               <Text style={{ fontSize: 13, color: theme.text2 }}>{t.task_title}</Text>
             </View>
           ))}
+          {tasks.length > 5 && (
+            <Text style={{ fontSize: 13, color: theme.orange, marginTop: 2, fontStyle: 'italic' }}>
+              + {tasks.length - 5} more tasks
+            </Text>
+          )}
           <Text style={{ fontSize: 13, color: theme.text2, marginTop: 8, marginBottom: 12 }}>
             What would you like to do with these?
           </Text>

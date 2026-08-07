@@ -145,7 +145,6 @@ function OrbitChatScreen({ theme }: { theme: any }) {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
     setIsTyping(true);
-    store.setStatus('GENERATING');
 
     try {
       const now = new Date();
@@ -161,7 +160,6 @@ function OrbitChatScreen({ theme }: { theme: any }) {
         }
       }
 
-
       const payload: any = {
         conversation_id: activeConversationId,
         user_message: enrichedPayloadText,
@@ -169,6 +167,19 @@ function OrbitChatScreen({ theme }: { theme: any }) {
         current_time: localISO,
         is_clarification_response: store.status === 'WAITING_FOR_CLARIFICATION'
       };
+
+      // Step 1: Precheck intent
+      try {
+        const precheckResponse = await api.post('/orbit/chat/precheck', payload);
+        if (precheckResponse?.is_heavy) {
+          store.setStatus('GENERATING');
+        }
+        if (precheckResponse?.intent) {
+          payload.client_intent = precheckResponse.intent;
+        }
+      } catch (e) {
+        // Ignore precheck failures and let the main chat endpoint handle it
+      }
 
       const response = await api.post('/orbit/chat', payload);
 
