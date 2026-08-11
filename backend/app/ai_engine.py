@@ -1311,6 +1311,7 @@ Extract and return a JSON object with these fields (only include fields that are
 Rules:
 - If the message is a direct answer to {pending_key or "nothing"}, put it in "answer_to_pending"
 - Extract tasks only from this message — do not repeat what is already known
+- If the user says they have no tasks, nothing to do, or asks for a break, DO NOT put that in the "tasks" array. Leave "tasks" empty or null.
 - If the user explicitly asks you to figure out the duration, fit it around fixed events, or fill the gaps, set "duration" to "auto".
 - Set "goal_has_duration" to true ONLY IF the tasks/events provided have universally obvious intrinsic durations (e.g., "Movie", "Dinner", "Flight", "Gym"). Otherwise false.
 - Return null for fields not mentioned

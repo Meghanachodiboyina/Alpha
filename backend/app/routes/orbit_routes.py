@@ -411,11 +411,27 @@ async def orbit_chat(
             crud.update_orbit_context(db, orbit_session, ctx)
 
             # Determine what's still missing and advance state
-            tasks_known      = bool(ctx.get("tasks"))
+            tasks_known      = bool(ctx.get("tasks")) or bool(ctx.get("fixed_events"))
             duration_known   = bool(ctx.get("duration"))
             constraints_known = ctx.get("constraints_asked", False) or bool(ctx.get("fixed_events")) or bool(ctx.get("constraints"))
 
             if not tasks_known:
+                ans = str(ctx.get("answer_to_pending") or "").lower()
+                abort_words = ["nothing", "none", "no", "nah", "don't", "dont"]
+                if state == "WAITING_FOR_TASKS" and any(w in ans for w in abort_words):
+                    reply = "Alright, enjoy your day! Let me know if you need to schedule anything later."
+                    crud.update_orbit_state(db, orbit_session, "IDLE")
+                    msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
+                    new_messages.append(msg)
+                    return schemas.OrbitChatResponse(
+                        conversation_id=convo.id,
+                        session_id=orbit_session.id,
+                        messages=[schemas.OrbitMessageOut.model_validate(m) for m in new_messages],
+                        routines_created=0,
+                        status="IDLE",
+                        session_state="IDLE",
+                    )
+
                 question = "What would you like to work on today?"
                 ctx["pending_question"] = question
                 ctx["pending_question_key"] = "tasks"
@@ -432,8 +448,9 @@ async def orbit_chat(
                     session_state="WAITING_FOR_TASKS",
                 )
 
-            if not duration_known:
-                tasks_str = ", ".join(ctx["tasks"][:3])
+            if not duration_known and not ctx.get("goal_has_duration"):
+                all_items = ctx.get("tasks", []) + ctx.get("fixed_events", [])
+                tasks_str = ", ".join(all_items[:3])
                 question = f"How long would you like to spend on {tasks_str}?"
                 ctx["pending_question"] = question
                 ctx["pending_question_key"] = "duration"
@@ -478,12 +495,28 @@ async def orbit_chat(
                 ctx = await extract_planning_context(payload.user_message, ctx)
                 crud.update_orbit_context(db, orbit_session, ctx)
 
-                tasks_known      = bool(ctx.get("tasks"))
+                tasks_known      = bool(ctx.get("tasks")) or bool(ctx.get("fixed_events"))
                 duration_known   = bool(ctx.get("duration"))
                 constraints_known = ctx.get("constraints_asked", False) or bool(ctx.get("fixed_events")) or bool(ctx.get("constraints"))
 
                 # Ask for missing info conversationally
                 if not tasks_known:
+                    ans = payload.user_message.lower()
+                    abort_words = ["nothing", "none", "no tasks", "don't have", "dont have"]
+                    if state == "WAITING_FOR_INPUT" and any(w in ans for w in abort_words):
+                        reply = "Alright! Enjoy your day. Let me know if you want to plan something later."
+                        crud.update_orbit_state(db, orbit_session, "IDLE")
+                        msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
+                        new_messages.append(msg)
+                        return schemas.OrbitChatResponse(
+                            conversation_id=convo.id,
+                            session_id=orbit_session.id,
+                            messages=[schemas.OrbitMessageOut.model_validate(m) for m in new_messages],
+                            routines_created=0,
+                            status="IDLE",
+                            session_state="IDLE",
+                        )
+                        
                     question = "What would you like to work on today?"
                     ctx["pending_question"] = question
                     ctx["pending_question_key"] = "tasks"
@@ -501,7 +534,8 @@ async def orbit_chat(
                     )
 
                 if not duration_known and not ctx.get("goal_has_duration"):
-                    tasks_str = ", ".join(ctx["tasks"][:3])
+                    all_items = ctx.get("tasks", []) + ctx.get("fixed_events", [])
+                    tasks_str = ", ".join(all_items[:3])
                     question = f"How long would you like to spend on {tasks_str}?"
                     ctx["pending_question"] = question
                     ctx["pending_question_key"] = "duration"
