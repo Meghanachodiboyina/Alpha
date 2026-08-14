@@ -193,6 +193,24 @@ def delete_conversation(
 
 # ─── Main Chat Endpoint ─────────────────────────────────────────────────────
 
+@router.post("/chat/precheck")
+@limiter.limit("20/minute")
+async def orbit_chat_precheck(
+    request: Request,
+    payload: schemas.OrbitChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ctx = {}
+    if payload.conversation_id:
+        orbit_session = crud.get_or_create_orbit_session(db, current_user.id, payload.conversation_id)
+        ctx = dict(orbit_session.context_json or {})
+    
+    intent = await classify_orbit_intent(payload.user_message, ctx)
+    is_heavy = intent in ("planning_request", "schedule_edit", "clarification_response")
+    return {"intent": intent, "is_heavy": is_heavy}
+
+
 @router.post("/chat", response_model=schemas.OrbitChatResponse)
 @limiter.limit("10/minute")
 async def orbit_chat(
@@ -252,11 +270,27 @@ async def orbit_chat(
     try:
         check_and_increment_ai_quota(db, current_user, "analysis_requests")
         # ── 4. Classify intent with full context awareness ───────────────────
-        intent = await classify_orbit_intent(payload.user_message, ctx)
+        if payload.client_intent:
+            intent = payload.client_intent
+        else:
+            intent = await classify_orbit_intent(payload.user_message, ctx)
 
         # ── 5. Handle non-planning intents first (regardless of state) ───────
         if intent == "greeting":
             reply = "Hi! I'm Orbit. Tell me your tasks, goals, or plans and I'll build your perfect schedule. ✦"
+            msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
+            new_messages.append(msg)
+            return schemas.OrbitChatResponse(
+                conversation_id=convo.id,
+                session_id=orbit_session.id,
+                messages=[schemas.OrbitMessageOut.model_validate(m) for m in new_messages],
+                routines_created=0,
+                status=state,
+                session_state=state,
+            )
+
+        if intent == "gratitude":
+            reply = "You're very welcome! Let me know if you need to adjust your schedule or plan anything else. ✦"
             msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
             new_messages.append(msg)
             return schemas.OrbitChatResponse(
@@ -377,11 +411,27 @@ async def orbit_chat(
             crud.update_orbit_context(db, orbit_session, ctx)
 
             # Determine what's still missing and advance state
-            tasks_known      = bool(ctx.get("tasks"))
+            tasks_known      = bool(ctx.get("tasks")) or bool(ctx.get("fixed_events"))
             duration_known   = bool(ctx.get("duration"))
             constraints_known = ctx.get("constraints_asked", False) or bool(ctx.get("fixed_events")) or bool(ctx.get("constraints"))
 
             if not tasks_known:
+                ans = str(ctx.get("answer_to_pending") or "").lower()
+                abort_words = ["nothing", "none", "no", "nah", "don't", "dont"]
+                if state == "WAITING_FOR_TASKS" and any(w in ans for w in abort_words):
+                    reply = "Alright, enjoy your day! Let me know if you need to schedule anything later."
+                    crud.update_orbit_state(db, orbit_session, "IDLE")
+                    msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
+                    new_messages.append(msg)
+                    return schemas.OrbitChatResponse(
+                        conversation_id=convo.id,
+                        session_id=orbit_session.id,
+                        messages=[schemas.OrbitMessageOut.model_validate(m) for m in new_messages],
+                        routines_created=0,
+                        status="IDLE",
+                        session_state="IDLE",
+                    )
+
                 question = "What would you like to work on today?"
                 ctx["pending_question"] = question
                 ctx["pending_question_key"] = "tasks"
@@ -398,8 +448,9 @@ async def orbit_chat(
                     session_state="WAITING_FOR_TASKS",
                 )
 
-            if not duration_known:
-                tasks_str = ", ".join(ctx["tasks"][:3])
+            if not duration_known and not ctx.get("goal_has_duration"):
+                all_items = ctx.get("tasks", []) + ctx.get("fixed_events", [])
+                tasks_str = ", ".join(all_items[:3])
                 question = f"How long would you like to spend on {tasks_str}?"
                 ctx["pending_question"] = question
                 ctx["pending_question_key"] = "duration"
@@ -444,12 +495,28 @@ async def orbit_chat(
                 ctx = await extract_planning_context(payload.user_message, ctx)
                 crud.update_orbit_context(db, orbit_session, ctx)
 
-                tasks_known      = bool(ctx.get("tasks"))
+                tasks_known      = bool(ctx.get("tasks")) or bool(ctx.get("fixed_events"))
                 duration_known   = bool(ctx.get("duration"))
                 constraints_known = ctx.get("constraints_asked", False) or bool(ctx.get("fixed_events")) or bool(ctx.get("constraints"))
 
                 # Ask for missing info conversationally
                 if not tasks_known:
+                    ans = payload.user_message.lower()
+                    abort_words = ["nothing", "none", "no tasks", "don't have", "dont have"]
+                    if state == "WAITING_FOR_INPUT" and any(w in ans for w in abort_words):
+                        reply = "Alright! Enjoy your day. Let me know if you want to plan something later."
+                        crud.update_orbit_state(db, orbit_session, "IDLE")
+                        msg = _save_message(db, convo.id, "orbit", reply, "orbit_message")
+                        new_messages.append(msg)
+                        return schemas.OrbitChatResponse(
+                            conversation_id=convo.id,
+                            session_id=orbit_session.id,
+                            messages=[schemas.OrbitMessageOut.model_validate(m) for m in new_messages],
+                            routines_created=0,
+                            status="IDLE",
+                            session_state="IDLE",
+                        )
+                        
                     question = "What would you like to work on today?"
                     ctx["pending_question"] = question
                     ctx["pending_question_key"] = "tasks"
@@ -467,7 +534,8 @@ async def orbit_chat(
                     )
 
                 if not duration_known and not ctx.get("goal_has_duration"):
-                    tasks_str = ", ".join(ctx["tasks"][:3])
+                    all_items = ctx.get("tasks", []) + ctx.get("fixed_events", [])
+                    tasks_str = ", ".join(all_items[:3])
                     question = f"How long would you like to spend on {tasks_str}?"
                     ctx["pending_question"] = question
                     ctx["pending_question_key"] = "duration"
@@ -508,16 +576,6 @@ async def orbit_chat(
             db.commit()
 
             # Build enriched prompt from accumulated context
-            # If the user asked to pull in their overdue/pending backlog, fetch
-            # the real tasks from the DB and add them to the plan.
-            combined_text = f"{convo.original_prompt or ''} {payload.user_message} {' '.join(ctx.get('tasks', []))}".lower()
-            if any(kw in combined_text for kw in ("overdue", "pending task", "backlog", "incomplete", "unfinished", "missed task")):
-                overdue_titles = crud.get_overdue_routine_titles(db, str(current_user.id))
-                if overdue_titles:
-                    existing = ctx.get("tasks") if isinstance(ctx.get("tasks"), list) else []
-                    merged = existing + [t for t in overdue_titles if t not in existing]
-                    ctx["tasks"] = merged
-                    crud.update_orbit_context(db, orbit_session, ctx)
 
             enriched_prompt = payload.user_message
             if ctx.get("tasks"):
@@ -559,7 +617,10 @@ async def orbit_chat(
 
             # Determine scheduled date
             try:
-                scheduled_date = date.fromisoformat(now_iso[:10])
+                if ai_plan.target_date:
+                    scheduled_date = date.fromisoformat(ai_plan.target_date)
+                else:
+                    scheduled_date = date.fromisoformat(now_iso[:10])
             except Exception:
                 scheduled_date = date.today()
 
@@ -590,6 +651,16 @@ async def orbit_chat(
                 )
 
             if ai_plan.routines:
+                # Cleanup previous generated routines in this conversation
+                routine_sessions = db.query(RoutineSession).filter(
+                    RoutineSession.conversation_id == convo.id
+                ).all()
+                for rs in routine_sessions:
+                    for r in list(rs.routines):
+                        db.delete(r)
+                    db.delete(rs)
+                db.commit()
+
                 routine_session = crud.create_routine_session(
                     db, current_user.id, scheduled_date, conversation_id=convo.id
                 )
@@ -770,6 +841,7 @@ def get_incomplete_tasks(
             Routine.date < today,
             Routine.status != "Completed",
             Routine.is_internal == False,
+            Routine.fixed_time == False,  # Don't carry over fixed events like movies/flights
         )
         .order_by(Routine.date.desc())
         .limit(20)
