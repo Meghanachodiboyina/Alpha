@@ -483,13 +483,13 @@ TRAVEL_TIER_BUFFERS = {
 }
 
 
-def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datetime | None = None, personality: str = "Balanced", travel_overrides: dict[int, str] | None = None, existing_blocks: list[tuple[datetime, datetime]] | None = None, user_memory_context: list[str] | None = None, clarifications: dict[str, str] | None = None, target_date: date | None = None) -> tuple[list[AIPlannedRoutine], list[dict], list[str], bool, int, int, list[str]]:
+def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datetime | None = None, personality: str = "Balanced", travel_overrides: dict[int, str] | None = None, existing_blocks: list[tuple[datetime, datetime]] | None = None, user_memory_context: list[str] | None = None, clarifications: dict[str, str] | None = None) -> tuple[list[AIPlannedRoutine], list[dict], list[str], bool, int, int, list[str]]:
     valid_tasks = [t for t in ai_tasks if t.get("confidence", 1.0) >= 0.5]
     if not valid_tasks:
         return [], [], [], False, 0, 0, []
 
-    today_date = target_date if target_date else (start_after.date() if start_after else date.today())
-    base_time = start_after if start_after and (not target_date or target_date == start_after.date()) else datetime.combine(today_date, time(8, 0))
+    today_date = start_after.date() if start_after else date.today()
+    base_time = start_after if start_after else datetime.combine(today_date, time(8, 0))
 
     # ── Chronotype (peak energy window) ──────────────────────────────────────
     peak_preference = None
@@ -653,7 +653,7 @@ def _optimize_schedule(ai_tasks: list[dict], plan_scope: str, start_after: datet
         end = start + timedelta(minutes=duration_mins)
         if end > end_of_day:
             return False
-        if start.time() < SLEEP_END:
+        if start.time() < SLEEP_END and start.date() == today_date:
             return False
         for s_start, s_end in occupied_slots:
             if start < s_end and end > s_start:
@@ -1224,15 +1224,6 @@ async def classify_orbit_intent(message: str, session_context: dict | None) -> s
       greeting | small_talk | unrelated | planning_request |
       clarification_response | schedule_edit
     """
-    message_lower = message.strip().lower()
-    fast_greetings = {"hi", "hello", "hey", "hiya", "good morning", "good evening", "good afternoon", "hi orbit", "hello orbit"}
-    if message_lower in fast_greetings and not (session_context or {}).get("pending_question_key"):
-        return "greeting"
-        
-    fast_gratitude = {"thank you", "thanks", "thanks orbit", "thank you orbit", "tq", "thx", "awesome", "perfect"}
-    if message_lower in fast_gratitude:
-        return "gratitude"
-
     pending_key = (session_context or {}).get("pending_question_key")
     pending_q   = (session_context or {}).get("pending_question")
     has_schedule = bool((session_context or {}).get("generated_routines"))
@@ -1311,7 +1302,6 @@ Extract and return a JSON object with these fields (only include fields that are
 Rules:
 - If the message is a direct answer to {pending_key or "nothing"}, put it in "answer_to_pending"
 - Extract tasks only from this message — do not repeat what is already known
-- If the user says they have no tasks, nothing to do, or asks for a break, DO NOT put that in the "tasks" array. Leave "tasks" empty or null.
 - If the user explicitly asks you to figure out the duration, fit it around fixed events, or fill the gaps, set "duration" to "auto".
 - Set "goal_has_duration" to true ONLY IF the tasks/events provided have universally obvious intrinsic durations (e.g., "Movie", "Dinner", "Flight", "Gym"). Otherwise false.
 - Return null for fields not mentioned
@@ -1556,7 +1546,7 @@ async def generate_ai_plan(input_text: str, plan_scope: str, current_time: str |
             start_after = dt.replace(tzinfo=None)
         except ValueError:
             pass
-        time_context_prompt = f"The user's current local time is: {current_time}. If they specify 'tomorrow', output tomorrow's date in target_date. Schedule strictly AFTER this time if target_date is today."
+        time_context_prompt = f"The user's current local time is: {current_time}. Schedule strictly AFTER this time."
 
     memory_prompt = ""
     if user_memory_context:
@@ -1570,7 +1560,6 @@ Output STRICT JSON matching this schema:
 {{
   "has_actionable_intent": true/false,
   "inferred_personality": "Balanced",
-  "target_date": "YYYY-MM-DD",
   "new_behavioral_insights": ["Pattern Type: The insight", ...],
   "tasks": [
     {{
@@ -1626,14 +1615,6 @@ Rules:
         groq_tasks = parsed.get("tasks", [])
         personality = parsed.get("inferred_personality", "Balanced")
         new_insights = parsed.get("new_behavioral_insights", [])
-        
-        target_date_str = parsed.get("target_date")
-        target_date_obj = None
-        if target_date_str:
-            try:
-                target_date_obj = date.fromisoformat(target_date_str)
-            except ValueError:
-                pass
 
         # Apply user clarifications
         if clarifications:
@@ -1658,13 +1639,12 @@ Rules:
                     except (ValueError, IndexError):
                         pass
 
-        planned_routines, flex_tasks, explanation_pts, is_over, total_mins, avail_mins, val_warns = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, travel_overrides=travel_overrides or None, existing_blocks=existing_blocks, user_memory_context=user_memory_context, clarifications=clarifications, target_date=target_date_obj)
+        planned_routines, flex_tasks, explanation_pts, is_over, total_mins, avail_mins, val_warns = _optimize_schedule(groq_tasks, plan_scope, start_after, personality, travel_overrides=travel_overrides or None, existing_blocks=existing_blocks, user_memory_context=user_memory_context, clarifications=clarifications)
         
         if is_over and not planned_routines:
             suggested = [t.get("title", "task") for t in sorted(groq_tasks, key=lambda x: x.get("urgency_score", 5))[:2]]
             return AIGenerationResponse(
                 summary=f"This plan requires {total_mins} minutes but only {avail_mins} are available.",
-                target_date=target_date_str,
                 productivity_tips=[],
                 routines=[],
                 explanation_points=explanation_pts,
@@ -1680,7 +1660,6 @@ Rules:
 
             return AIGenerationResponse(
                 summary="Your optimized schedule is ready.",
-                target_date=target_date_str,
                 explanation="\n".join(explanation_pts) if explanation_pts else None,
                 schedule_confidence=round(avg_confidence, 2),
                 productivity_tips=[

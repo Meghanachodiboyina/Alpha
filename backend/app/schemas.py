@@ -280,7 +280,6 @@ class AIPlannedRoutine(BaseModel):
 
 class AIGenerationResponse(BaseModel):
     summary: str
-    target_date: Optional[str] = None
     productivity_tips: list[str]
     routines: list[AIPlannedRoutine]
     schedule_confidence: float = Field(default=1.0)
@@ -806,8 +805,6 @@ class OrbitChatRequest(BaseModel):
     clarifications: Optional[dict[str, str]] = None
     # Internal: indicate this is a follow-up after clarification
     is_clarification_response: bool = False
-    # Intent passed from preflight check
-    client_intent: Optional[str] = None
 
 
 class OrbitChatResponse(BaseModel):

@@ -350,29 +350,6 @@ export default function RoutinesScreen() {
     );
   };
 
-  const handleClearTodayTasks = () => {
-    Alert.alert(
-      "Clear Today's Tasks",
-      "Are you sure you want to permanently delete all your tasks for today?",
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete All", 
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const todayStr = new Date().toISOString().split('T')[0];
-              await api.delete(`/routines/history/by-date?date=${todayStr}`);
-              setSections(prev => ({ ...prev, today: [] }));
-            } catch (error) {
-              Alert.alert("Error", "Failed to clear today's tasks.");
-            }
-          }
-        }
-      ]
-    );
-  };
-
   // ── Actions ──
   const handleAction = (r: Routine, action: string) => {
     if (action === 'delete') {
@@ -543,13 +520,6 @@ export default function RoutinesScreen() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>Overdue Tasks</Text>
                   <TouchableOpacity onPress={handleClearAllOverdue} style={{ padding: 6, paddingHorizontal: 12, backgroundColor: theme.red + '22', borderRadius: 8 }}>
-                    <Text style={{ color: theme.red, fontSize: 13, fontWeight: '600' }}>Clear All</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-              {activeSection === 'today' && displayedRoutines.length > 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 16 }}>
-                  <TouchableOpacity onPress={handleClearTodayTasks} style={{ padding: 6, paddingHorizontal: 12, backgroundColor: theme.red + '22', borderRadius: 8 }}>
                     <Text style={{ color: theme.red, fontSize: 13, fontWeight: '600' }}>Clear All</Text>
                   </TouchableOpacity>
                 </View>

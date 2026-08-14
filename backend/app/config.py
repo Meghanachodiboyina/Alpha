@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # AI / Groq Settings
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "openai/gpt-oss-120b"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     # Supabase Settings
     SUPABASE_URL: Optional[str] = None
